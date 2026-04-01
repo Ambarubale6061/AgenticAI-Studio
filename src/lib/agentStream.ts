@@ -30,6 +30,7 @@ export async function streamAgentResponse({
 
     if (!resp.ok) {
       const errorData = await resp.json().catch(() => ({ error: "Request failed" }));
+      console.error(`[${functionName}] ${resp.status}:`, errorData);
       onError(errorData.error || `Error ${resp.status}`);
       return;
     }
@@ -110,6 +111,7 @@ export async function streamAgentResponse({
       onError("Request cancelled");
       return;
     }
+    console.error(`[${functionName}] fetch error:`, e);
     onError(e instanceof Error ? e.message : "Unknown error");
   }
 }
@@ -133,6 +135,7 @@ export async function callPlannerAgent(prompt: string, signal?: AbortSignal): Pr
 
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: "Planner failed" }));
+    console.error("Planner error:", err);
     throw new Error(err.error || "Planner failed");
   }
 

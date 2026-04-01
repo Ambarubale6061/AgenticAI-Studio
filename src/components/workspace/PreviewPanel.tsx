@@ -1,3 +1,5 @@
+// src/components/workspace/PreviewPanel.tsx
+
 import { useEffect, useRef, useState, useMemo } from "react";
 import { Eye, RefreshCw, AlertTriangle, Server } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,10 +21,8 @@ type PreviewMode = "html" | "react" | "js" | "backend" | "none";
 function detectMode(files: CodeFile[]): PreviewMode {
   if (files.length === 0) return "none";
 
-  // Split browser vs server files up front
   const browserFiles = files.filter((f) => !isServerSideFile(f));
 
-  // Everything is server-side (e.g. Express + Mongoose project)
   if (browserFiles.length === 0) return "backend";
 
   const hasHtml = browserFiles.some(
@@ -37,14 +37,14 @@ function detectMode(files: CodeFile[]): PreviewMode {
         /\breact\b/i.test(f.code) &&
         /<[A-Z][A-Za-z]*[\s/>]/.test(f.code)),
   );
-  const hasJs  = browserFiles.some(
+  const hasJs = browserFiles.some(
     (f) => f.language === "javascript" || f.language === "typescript",
   );
   const hasCss = browserFiles.some((f) => f.language === "css");
 
-  if (hasReact)                 return "react";
+  if (hasReact) return "react";
   if (hasHtml || (hasCss && hasJs)) return "html";
-  if (hasJs || hasCss)          return "js";
+  if (hasJs || hasCss) return "js";
   return "none";
 }
 
@@ -63,8 +63,8 @@ function buildReactPreview(files: CodeFile[]): string {
     browserFiles.find((f) => ["javascript", "typescript"].includes(f.language)) ??
     browserFiles[0];
 
-  const cssFiles   = browserFiles.filter((f) => f.language === "css");
-  const inlineCss  = cssFiles.map((f) => f.code).join("\n");
+  const cssFiles = browserFiles.filter((f) => f.language === "css");
+  const inlineCss = cssFiles.map((f) => f.code).join("\n");
 
   return `<!DOCTYPE html>
 <html>
@@ -111,7 +111,6 @@ function buildReactPreview(files: CodeFile[]): string {
 
 /** Multi-file HTML preview — strips broken paths, inlines browser-safe CSS + JS only. */
 function buildHtmlPreview(files: CodeFile[]): string {
-  // bundleWebFiles already filters server-side files internally
   if (files.length > 1) return bundleWebFiles(files);
 
   const htmlFile = files.find(
@@ -148,14 +147,13 @@ function buildHtmlPreview(files: CodeFile[]): string {
 function buildJsPreview(files: CodeFile[]): string {
   const browserFiles = files.filter((f) => !isServerSideFile(f));
   const cssFiles = browserFiles.filter((f) => f.language === "css");
-  const jsFiles  = browserFiles.filter(
+  const jsFiles = browserFiles.filter(
     (f) => f.language === "javascript" || f.language === "typescript",
   );
 
   const inlineCss = cssFiles.map((f) => f.code).join("\n");
-  const rawJs     = jsFiles.map((f) => f.code).join("\n\n");
+  const rawJs = jsFiles.map((f) => f.code).join("\n\n");
 
-  // Strip TypeScript-only syntax
   const js = rawJs
     .replace(/:\s*(string|number|boolean|any|void|object|unknown|never|null|undefined)(\[\])?(?=\s*[,);=|&\n{])/g, "")
     .replace(/\binterface\s+\w+[\s\S]*?\n\}/gm, "")
@@ -241,13 +239,13 @@ function buildBackendPlaceholder(files: CodeFile[]): string {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const PreviewPanel = ({ files, visible = true }: PreviewPanelProps) => {
-  const iframeRef   = useRef<HTMLIFrameElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [iframeError, setIframeError] = useState<string | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   const mode = useMemo(() => detectMode(files), [files]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const previewHTML = useMemo<string | null>(() => {
     if (files.length === 0) return null;
     try {
@@ -258,32 +256,33 @@ const PreviewPanel = ({ files, visible = true }: PreviewPanelProps) => {
         case "backend": return buildBackendPlaceholder(files);
         default:        return null;
       }
-    } catch {
+    } catch (err) {
+      console.error("Preview generation error:", err);
+      setIframeError(err instanceof Error ? err.message : "Failed to build preview");
       return null;
     }
   }, [files, mode, refreshKey]);
 
+  // Update iframe srcdoc when previewHTML changes
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe || !previewHTML) return;
+
+    setIsUpdating(true);
     setIframeError(null);
+
     try {
-      const doc = iframe.contentDocument;
-      if (doc) {
-        doc.open();
-        doc.write(previewHTML);
-        doc.close();
-      }
+      // Use srcdoc instead of writing to document
+      iframe.srcdoc = previewHTML;
     } catch (e) {
-      setIframeError(
-        e instanceof Error ? e.message : "Failed to render preview",
-      );
+      setIframeError(e instanceof Error ? e.message : "Unknown error");
+    } finally {
+      setIsUpdating(false);
     }
   }, [previewHTML]);
 
   if (!visible) return null;
 
-  // ── Empty state ────────────────────────────────────────────────────────────
   if (mode === "none" || !previewHTML) {
     return (
       <div className="flex flex-col h-full">
@@ -302,7 +301,6 @@ const PreviewPanel = ({ files, visible = true }: PreviewPanelProps) => {
   return (
     <div className="flex flex-col h-full">
       <PanelHeader title="Preview" icon={Eye} iconColor="text-accent">
-        {/* Mode badge */}
         <span
           className={`text-[10px] font-mono uppercase tracking-widest px-1.5 py-0.5 rounded select-none ${
             mode === "backend"
@@ -320,7 +318,6 @@ const PreviewPanel = ({ files, visible = true }: PreviewPanelProps) => {
           )}
         </span>
 
-        {/* Refresh */}
         <Button
           variant="ghost"
           size="icon"
@@ -332,7 +329,6 @@ const PreviewPanel = ({ files, visible = true }: PreviewPanelProps) => {
         </Button>
       </PanelHeader>
 
-      {/* Error banner */}
       {iframeError && (
         <div className="flex items-center gap-2 px-3 py-1.5 bg-destructive/10 border-b border-destructive/30 text-destructive text-xs font-mono">
           <AlertTriangle className="h-3 w-3 shrink-0" />
@@ -347,6 +343,7 @@ const PreviewPanel = ({ files, visible = true }: PreviewPanelProps) => {
           sandbox="allow-scripts allow-modals"
           className="w-full h-full border-0"
           title="Preview"
+          srcdoc={previewHTML}
         />
       </div>
     </div>

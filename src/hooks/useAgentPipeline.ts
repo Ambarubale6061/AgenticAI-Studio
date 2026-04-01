@@ -12,7 +12,11 @@ import {
   parseDebuggerResponse,
 } from "@/lib/agentStream";
 import {
+  canExecuteLocally,
   executeInBrowser,
+  bundleWebFiles,
+  WEB_LANGUAGES,
+  BACKEND_LANGUAGES,
 } from "@/lib/browserExecutor";
 import { addMemoryEntry, getMemoryContext } from "@/lib/agentMemory";
 import {
@@ -55,7 +59,7 @@ export function savePanelSizes(sizes: number[]) {
   localStorage.setItem(PANEL_SIZES_KEY, JSON.stringify(sizes));
 }
 
-// ─── Fix #3: Language router ──────────────────────────────────────────────────
+// ─── Language routing ─────────────────────────────────────────────────────────
 
 type ExecutionResult = {
   stdout: string;
@@ -65,25 +69,18 @@ type ExecutionResult = {
   isReal?: boolean;
 };
 
-/** True for HTML / CSS / JS / TS / React – anything we can run in the browser. */
 function isWebLanguage(lang: string): boolean {
-  const webLangs = ["html", "css", "javascript", "typescript", "react", "jsx", "tsx"];
-  return webLangs.includes(lang.toLowerCase());
+  return WEB_LANGUAGES.includes(lang.toLowerCase());
 }
 
-/** True for Python, Java, Node, etc. – needs a remote sandbox. */
 function isBackendLanguage(lang: string): boolean {
-  const backendLangs = ["python", "java", "node", "nodejs", "ruby", "go", "rust", "cpp", "c", "bash", "shell"];
-  return backendLangs.includes(lang.toLowerCase());
+  return BACKEND_LANGUAGES.includes(lang.toLowerCase());
 }
-
-// ─── Remote execution (Supabase Edge Function or Piston fallback) ─────────────
 
 async function executeCodeRemote(
   files: Array<{ filename: string; language: string; code: string }>,
   language: string,
 ): Promise<ExecutionResult> {
-  // Primary: your Supabase code-executor function
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   if (supabaseUrl) {
     const url = `${supabaseUrl}/functions/v1/code-executor`;
@@ -102,7 +99,6 @@ async function executeCodeRemote(
     }
   }
 
-  // Fallback: Piston public API (no key required, supports python/java/node/etc.)
   const pistonLangMap: Record<string, { language: string; version: string }> = {
     python:  { language: "python",     version: "3.10.0" },
     java:    { language: "java",        version: "15.0.2" },
@@ -168,7 +164,6 @@ export function useAgentPipeline(projectId?: string) {
   const { user } = useAuth();
   const { data: savedMessages } = useProjectMessages(projectId);
 
-  // Load saved messages on mount
   useEffect(() => {
     if (savedMessages && savedMessages.length > 0 && messages.length === 0) {
       setMessages(
@@ -278,13 +273,8 @@ export function useAgentPipeline(projectId?: string) {
     [addConsole],
   );
 
-  // ─── Fix #2 + #3: Smart bundling + environment switching ──────────────────
+  // ─── Execution router ──────────────────────────────────────────────────────
 
-  /**
-   * Determine the effective language for routing.
-   * JSX/TSX files produced by the AI may be labelled "typescript" or "javascript";
-   * detect React by looking for JSX syntax.
-   */
   function detectEffectiveLanguage(
     rawLang: string,
     files: Array<{ filename: string; language: string; code: string }>,
@@ -292,7 +282,6 @@ export function useAgentPipeline(projectId?: string) {
     const lang = rawLang.toLowerCase();
     if (lang === "react" || lang === "jsx" || lang === "tsx") return "react";
 
-    // Upgrade JS/TS to "react" if any file contains JSX
     if (lang === "javascript" || lang === "typescript") {
       const hasJsx = files.some(
         (f) =>
@@ -302,7 +291,6 @@ export function useAgentPipeline(projectId?: string) {
       if (hasJsx) return "react";
     }
 
-    // .tsx / .jsx filenames → react
     const mainFile = files[0];
     if (
       mainFile?.filename.endsWith(".tsx") ||
@@ -320,7 +308,6 @@ export function useAgentPipeline(projectId?: string) {
     ): Promise<ExecutionResult> => {
       const effectiveLang = detectEffectiveLanguage(language, codeFiles);
 
-      // ── Web / browser path ──────────────────────────────────────
       if (isWebLanguage(effectiveLang)) {
         addConsole("info", `▸ Executing in browser sandbox (${effectiveLang})…`);
 
@@ -328,7 +315,6 @@ export function useAgentPipeline(projectId?: string) {
         let execLang = effectiveLang;
 
         if (effectiveLang === "react") {
-          // Use main .tsx/.jsx file; fall back to first file
           const mainFile =
             codeFiles.find(
               (f) =>
@@ -338,9 +324,7 @@ export function useAgentPipeline(projectId?: string) {
             ) ?? codeFiles[0];
           codeToRun = mainFile.code;
         } else if (effectiveLang === "html" && codeFiles.length > 1) {
-          // Fix #2: bundle CSS + JS directly into HTML string
-          const mainFile = codeFiles.find((f) => f.language === "html") ?? codeFiles[0];
-          codeToRun = mainFile.code;
+          codeToRun = bundleWebFiles(codeFiles);
           execLang = "html";
         } else {
           const mainFile =
@@ -365,7 +349,6 @@ export function useAgentPipeline(projectId?: string) {
         }
       }
 
-      // ── Backend / remote path ───────────────────────────────────
       if (isBackendLanguage(effectiveLang)) {
         addConsole("info", `▸ Sending to remote executor (${effectiveLang})…`);
         try {
@@ -373,22 +356,19 @@ export function useAgentPipeline(projectId?: string) {
         } catch (e) {
           return {
             stdout: "",
-            stderr:
-              e instanceof Error ? e.message : "Remote execution failed",
+            stderr: e instanceof Error ? e.message : "Remote execution failed",
             exitCode: 1,
           };
         }
       }
 
-      // ── Unknown language: AI simulation fallback ────────────────
       addConsole("info", "▸ Simulating execution via AI…");
       try {
         return await executeCodeRemote(codeFiles, effectiveLang);
       } catch (e) {
         return {
           stdout: "",
-          stderr:
-            e instanceof Error ? e.message : "Execution failed",
+          stderr: e instanceof Error ? e.message : "Execution failed",
           exitCode: 1,
         };
       }
@@ -597,7 +577,7 @@ export function useAgentPipeline(projectId?: string) {
       retryCountRef.current = 0;
 
       try {
-        // 1. PLANNER ────────────────────────────────────────────────
+        // 1. PLANNER
         setAgentState("planning");
         addConsole("info", "▸ Starting agent pipeline…");
         addConsole(
@@ -642,7 +622,7 @@ export function useAgentPipeline(projectId?: string) {
           ),
         );
 
-        // 2. CODER ──────────────────────────────────────────────────
+        // 2. CODER
         const coderResult = await runCoderAgent(content, plan, signal);
 
         if (!coderResult) {
@@ -655,12 +635,24 @@ export function useAgentPipeline(projectId?: string) {
           prev.map((s) => ({ ...s, status: "done" as const })),
         );
 
-        // 3. EXECUTE ────────────────────────────────────────────────
+        // 3. EXECUTE
         addConsole("info", "▸ Executing generated code…");
         setAgentState("coding");
 
         let currentFiles = coderResult.files;
-        let execResult = await executeCode(currentFiles, plan.language);
+        let execResult: ExecutionResult;
+
+        try {
+          execResult = await executeCode(currentFiles, plan.language);
+        } catch (err) {
+          addConsole(
+            "stderr",
+            `Execution error: ${err instanceof Error ? err.message : "Unknown error"}`,
+          );
+          setAgentState("error");
+          setIsLoading(false);
+          return;
+        }
 
         addConsole(
           execResult.exitCode === 0 ? "stdout" : "stderr",
@@ -669,16 +661,11 @@ export function useAgentPipeline(projectId?: string) {
             : execResult.stderr || "Unknown error",
         );
 
-        // 4. AUTO-DEBUG LOOP ─────────────────────────────────────────
-        // Fix #4: Skip the debug loop entirely for web languages — a non-zero
-        // exit after the browser executor already de-escalated real timeouts
-        // means a genuine JS error; we still cap at 3 retries.
+        // 4. AUTO-DEBUG LOOP
         const effectiveLang = plan.language.toLowerCase();
         const isWeb = isWebLanguage(effectiveLang);
 
         while (execResult.exitCode !== 0 && retryCountRef.current < 3) {
-          // Fix #4: For web languages, if the only error looks like a timeout
-          // artefact (not a real JS error), break early to stop infinite loops.
           if (
             isWeb &&
             (execResult.stderr ?? "").toLowerCase().includes("timeout")
@@ -714,7 +701,12 @@ export function useAgentPipeline(projectId?: string) {
           currentFiles = debugResult.fixes;
 
           addConsole("info", "▸ Re-executing fixed code…");
-          execResult = await executeCode(currentFiles, plan.language);
+          try {
+            execResult = await executeCode(currentFiles, plan.language);
+          } catch (err) {
+            addConsole("stderr", `Re-execution error: ${err instanceof Error ? err.message : "Unknown"}`);
+            break;
+          }
           addConsole(
             execResult.exitCode === 0 ? "stdout" : "stderr",
             execResult.exitCode === 0
@@ -734,7 +726,7 @@ export function useAgentPipeline(projectId?: string) {
           );
         }
 
-        // 5. PERSIST ────────────────────────────────────────────────
+        // 5. PERSIST
         if (
           projectId &&
           projectId !== "new" &&

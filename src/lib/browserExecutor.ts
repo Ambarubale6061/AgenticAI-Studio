@@ -24,10 +24,6 @@ export function canExecuteLocally(language: string): boolean {
 }
 
 // ─── Server-side file detection ───────────────────────────────────────────────
-//
-// When the AI generates a full-stack project (Express + Stripe + Mongoose etc.),
-// injecting server files into an iframe crashes silently and produces a blank preview.
-// These patterns reliably identify Node.js-only code.
 
 const SERVER_PATTERNS: RegExp[] = [
   /\brequire\s*\(\s*['"](?:express|mongoose|stripe|pg|mysql2?|redis|sequelize|knex|prisma|typeorm|dotenv|path|fs|http|https|crypto|os|child_process|cluster|net|tls|stream|zlib|buffer|util|events|assert|querystring|url)['"]\s*\)/,
@@ -97,12 +93,8 @@ export function sanitizeHtml(html: string): string {
   );
 }
 
-// ─── HTML page builders ───────────────────────────────────────────────────────
+// ─── HTML page builders (with fixed 'done' message) ──────────────────────────
 
-/**
- * Fix #5: React support via Babel standalone + React 18 UMD.
- * Posts 'done' after 800 ms (Fix #1).
- */
 function buildReactHtml(code: string): string {
   return `<!DOCTYPE html>
 <html>
@@ -127,9 +119,8 @@ function buildReactHtml(code: string): string {
   <div id="root"></div>
   <script type="text/babel" data-presets="react,typescript">
     const _p = window.parent;
-    const _log = (...a) =>
-      _p.postMessage({ type: 'log', data: a.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(' ') }, '*');
-    const _err = (msg) => _p.postMessage({ type: 'error', data: msg }, '*');
+    const _log = (...a) => _p.postMessage({ type:'log', data: a.map(x=>typeof x==='object'?JSON.stringify(x):String(x)).join(' ') }, '*');
+    const _err = (msg) => _p.postMessage({ type:'error', data: msg }, '*');
     console.log = _log; console.warn = _log; console.info = _log;
     console.error = (...a) => _err(a.join(' '));
     window.onerror = (_m, _s, _l, _c, err) => {
@@ -138,9 +129,6 @@ function buildReactHtml(code: string): string {
         '<div id="preview-error">' + (err ? err.message : _m) + '</div>';
       return true;
     };
-    // Fix #1: send 'done' after 800 ms so heavy pages don't hit the timeout
-    setTimeout(() => _p.postMessage({ type: 'done' }, '*'), 800);
-
     try {
       ${code}
       const _root = document.getElementById('root');
@@ -151,15 +139,14 @@ function buildReactHtml(code: string): string {
       _err(e.name + ': ' + e.message);
       document.getElementById('root').innerHTML =
         '<div id="preview-error">' + e.name + ': ' + e.message + '</div>';
+    } finally {
+      setTimeout(() => _p.postMessage({ type: 'done' }, '*'), 500);
     }
   <\/script>
 </body>
 </html>`;
 }
 
-/**
- * Plain JS / TS — sends 'done' synchronously after the script body.
- */
 function buildJsHtml(code: string, language: string): string {
   const jsCode =
     language === "typescript"
@@ -180,15 +167,12 @@ window.onerror = (_m,_s,_l,_c,e) => { _err(e?e.message:_m); return true; };
 try {
 ${jsCode}
 } catch(e) { _err(e.name+': '+e.message); }
-_p.postMessage({ type:'done' }, '*');
+finally {
+  _p.postMessage({ type:'done' }, '*');
+}
 <\/script></body></html>`;
 }
 
-/**
- * Full HTML pages.
- * Fix #1: posts 'done' after 800 ms.
- * Fix #2: strips broken relative imports first.
- */
 function buildFullHtml(rawHtml: string): string {
   let html = sanitizeHtml(rawHtml);
 
@@ -202,7 +186,6 @@ function buildFullHtml(rawHtml: string): string {
   console.info  = (...a) => { _p.postMessage({type:'log',   data:_fmt(a)},'*'); _oi(...a); };
   console.error = (...a) => { _p.postMessage({type:'error', data:_fmt(a)},'*'); _oe(...a); };
   window.onerror = (_m,_s,_l,_c,e) => { _p.postMessage({type:'error',data:e?e.message:_m},'*'); return true; };
-  // Fix #1: 800 ms regardless of asset load state
   setTimeout(() => _p.postMessage({type:'done'},'*'), 800);
 })();
 <\/script>`;
@@ -218,7 +201,6 @@ function buildFullHtml(rawHtml: string): string {
   return html;
 }
 
-/** CSS-only: wrap in a simple demo page. */
 function buildCssHtml(css: string): string {
   return `<!DOCTYPE html>
 <html>
@@ -269,12 +251,14 @@ export function executeInBrowser(
       try { document.body.removeChild(iframe); } catch { /* already removed */ }
     };
 
+    let finished = false;
     const finish = (timedOut = false) => {
+      if (finished) return;
+      finished = true;
       clearTimeout(timer);
       window.removeEventListener("message", handler);
       const elapsed = `${((performance.now() - start) / 1000).toFixed(2)}s`;
 
-      // Fix #4: HTML/React timeout with no JS errors → rendered successfully
       if (timedOut && isVisualLang && errors.length === 0) {
         cleanup();
         resolve({
@@ -289,9 +273,7 @@ export function executeInBrowser(
 
       cleanup();
       resolve({
-        stdout:
-          logs.join("\n") ||
-          (errors.length === 0 ? "Code executed successfully (no output)" : ""),
+        stdout: logs.join("\n") || (errors.length === 0 ? "Code executed successfully (no output)" : ""),
         stderr: errors.join("\n"),
         exitCode: errors.length > 0 ? 1 : 0,
         executionTime: elapsed,
@@ -330,31 +312,30 @@ export function executeInBrowser(
         break;
     }
 
-    const doc = iframe.contentDocument;
-    if (doc) {
-      doc.open();
-      doc.write(html);
-      doc.close();
-    } else {
+    try {
+      const doc = iframe.contentDocument;
+      if (doc) {
+        doc.open();
+        doc.write(html);
+        doc.close();
+      } else {
+        finish(false);
+      }
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : "Iframe write failed");
       finish(false);
     }
   });
 }
 
 // ─── Multi-file bundler ───────────────────────────────────────────────────────
-//
-// Fix #2 (pipeline side) + ROOT CAUSE FIX:
-// Filters out server-side files before bundling so Node.js code never
-// reaches the browser iframe. Only browser-safe HTML/CSS/JS is injected.
 
 export function bundleWebFiles(
   files: Array<{ filename: string; language: string; code: string }>,
 ): string {
-  // Separate browser-safe files from server-side files
   const browserFiles = files.filter((f) => !isServerSideFile(f));
-  const serverFiles  = files.filter((f) =>  isServerSideFile(f));
+  const serverFiles = files.filter((f) => isServerSideFile(f));
 
-  // If every file is server-side, render a friendly "backend only" placeholder
   if (browserFiles.length === 0) {
     const fileList = serverFiles.map((f) => `• ${f.filename}`).join("\n");
     return `<!DOCTYPE html>
@@ -382,7 +363,6 @@ export function bundleWebFiles(
 </html>`;
   }
 
-  // Find the main HTML file among browser-safe files
   const htmlFile = browserFiles.find(
     (f) =>
       f.language === "html" ||
@@ -392,12 +372,12 @@ export function bundleWebFiles(
   const cssFiles = browserFiles.filter(
     (f) => f.language === "css" || f.filename.endsWith(".css"),
   );
-  const jsFiles  = browserFiles.filter(
+  const jsFiles = browserFiles.filter(
     (f) =>
       (f.language === "javascript" ||
-       f.language === "typescript" ||
-       f.filename.endsWith(".js") ||
-       f.filename.endsWith(".ts")) &&
+        f.language === "typescript" ||
+        f.filename.endsWith(".js") ||
+        f.filename.endsWith(".ts")) &&
       !f.filename.endsWith(".test.ts") &&
       !f.filename.endsWith(".spec.ts"),
   );
@@ -406,7 +386,6 @@ export function bundleWebFiles(
     ? sanitizeHtml(htmlFile.code)
     : "<!DOCTYPE html><html><head></head><body></body></html>";
 
-  // Inject CSS inline
   if (cssFiles.length > 0) {
     const styleTag = `<style>\n${cssFiles.map((f) => f.code).join("\n\n")}\n</style>`;
     if (baseHtml.includes("</head>")) {
@@ -416,7 +395,6 @@ export function bundleWebFiles(
     }
   }
 
-  // Inject browser-safe JS inline
   if (jsFiles.length > 0) {
     const scriptTag = `<script>\n${jsFiles.map((f) => f.code).join("\n\n")}<\/script>`;
     if (baseHtml.includes("</body>")) {
