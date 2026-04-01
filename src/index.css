@@ -1,0 +1,130 @@
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800;900&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 228 12% 8%;
+    --foreground: 210 20% 92%;
+
+    --card: 225 14% 11%;
+    --card-foreground: 210 20% 92%;
+
+    --popover: 225 14% 11%;
+    --popover-foreground: 210 20% 92%;
+
+    --primary: 142 72% 50%;
+    --primary-foreground: 228 12% 8%;
+
+    --secondary: 225 14% 16%;
+    --secondary-foreground: 210 20% 82%;
+
+    --muted: 225 12% 14%;
+    --muted-foreground: 215 14% 52%;
+
+    --accent: 262 80% 60%;
+    --accent-foreground: 210 20% 95%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 225 12% 18%;
+    --input: 225 12% 18%;
+    --ring: 142 72% 50%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 228 14% 6%;
+    --sidebar-foreground: 210 20% 82%;
+    --sidebar-primary: 142 72% 50%;
+    --sidebar-primary-foreground: 228 12% 8%;
+    --sidebar-accent: 225 14% 14%;
+    --sidebar-accent-foreground: 210 20% 92%;
+    --sidebar-border: 225 12% 16%;
+    --sidebar-ring: 142 72% 50%;
+
+    /* Custom tokens */
+    --agent-planner: 199 89% 48%;
+    --agent-coder: 142 72% 50%;
+    --agent-debugger: 32 95% 55%;
+    --agent-error: 0 72% 55%;
+    --panel-header: 225 14% 13%;
+    --panel-border: 225 10% 20%;
+    --terminal-bg: 228 16% 6%;
+    --glow-green: 142 72% 50%;
+    --glow-purple: 262 80% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Inter", system-ui, sans-serif;
+  }
+
+  code,
+  pre,
+  .font-mono {
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(var(--background));
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}
+
+/* Glow effects */
+.glow-green {
+  box-shadow: 0 0 20px -5px hsl(var(--glow-green) / 0.3);
+}
+.glow-purple {
+  box-shadow: 0 0 20px -5px hsl(var(--glow-purple) / 0.3);
+}
+
+/* Pulse animation for agent status */
+@keyframes agent-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+.agent-pulse {
+  animation: agent-pulse 1.5s ease-in-out infinite;
+}
+
+/* Typing cursor */
+@keyframes blink-cursor {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+.typing-cursor::after {
+  content: "▋";
+  animation: blink-cursor 1s step-end infinite;
+  color: hsl(var(--primary));
+}
