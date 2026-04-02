@@ -68,9 +68,7 @@
 
 ### 🚀 Deployed App
 
-👉 [https://your-deploy-link.com](https://your-deploy-link.com)
-
-_(Replace this with your actual deployed URL — Vercel / Netlify)_
+👉 [https://agentic-ai-studio-iota.vercel.app/](https://agentic-ai-studio-iota.vercel.app/)
 
 ---
 
