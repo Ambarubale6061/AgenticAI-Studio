@@ -12,7 +12,7 @@
 
 ### 📊 Dashboard
 
-![Dashboard](src/assets/dash.jpg)
+![Dashboard](src/assets/Dash.jpg)
 
 ### 💻 IDE Workspace
 
