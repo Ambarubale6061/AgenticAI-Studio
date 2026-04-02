@@ -1,3 +1,4 @@
+// src/hooks/useAgentPipeline.ts
 import { useState, useCallback, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import type { ChatMessage } from "@/components/workspace/ChatPanel";
@@ -25,6 +26,17 @@ import {
   useProjectMessages,
 } from "@/hooks/useProjects";
 import { useAuth } from "@/hooks/useAuth";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type ExecutionResult = {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  executionTime?: string;
+  isReal?: boolean;
+  language?: string;
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -61,14 +73,6 @@ export function savePanelSizes(sizes: number[]) {
 
 // ─── Language routing ─────────────────────────────────────────────────────────
 
-type ExecutionResult = {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-  executionTime?: string;
-  isReal?: boolean;
-};
-
 function isWebLanguage(lang: string): boolean {
   return WEB_LANGUAGES.includes(lang.toLowerCase());
 }
@@ -81,6 +85,7 @@ async function executeCodeRemote(
   files: Array<{ filename: string; language: string; code: string }>,
   language: string,
 ): Promise<ExecutionResult> {
+  // 1. Try Supabase edge function first
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   if (supabaseUrl) {
     const url = `${supabaseUrl}/functions/v1/code-executor`;
@@ -93,12 +98,16 @@ async function executeCodeRemote(
         },
         body: JSON.stringify({ files, language }),
       });
-      if (resp.ok) return resp.json();
+      if (resp.ok) {
+        const data = await resp.json();
+        return { ...data, language };
+      }
     } catch {
       // fall through to Piston
     }
   }
 
+  // 2. Try Piston API (real execution for most languages)
   const pistonLangMap: Record<string, { language: string; version: string }> = {
     python:  { language: "python",     version: "3.10.0" },
     java:    { language: "java",        version: "15.0.2" },
@@ -111,6 +120,11 @@ async function executeCodeRemote(
     c:       { language: "c",           version: "10.2.0" },
     bash:    { language: "bash",        version: "5.1.0" },
     shell:   { language: "bash",        version: "5.1.0" },
+    kotlin:  { language: "kotlin",      version: "1.4.31" },
+    swift:   { language: "swift",       version: "5.3.3" },
+    scala:   { language: "scala",       version: "3.2.2" },
+    php:     { language: "php",         version: "8.2.3" },
+    r:       { language: "r",           version: "4.1.1" },
   };
 
   const pistonTarget = pistonLangMap[language.toLowerCase()];
@@ -127,11 +141,14 @@ async function executeCodeRemote(
       });
       if (pistonResp.ok) {
         const data = await pistonResp.json();
-        const run = data.run ?? {};
+        const run  = data.run ?? {};
         return {
           stdout: run.stdout ?? "",
           stderr: run.stderr ?? "",
           exitCode: run.code ?? (run.stderr ? 1 : 0),
+          executionTime: "real",
+          isReal: true,
+          language,
         };
       }
     } catch {
@@ -141,27 +158,31 @@ async function executeCodeRemote(
 
   return {
     stdout: "",
-    stderr: "Remote execution unavailable. Please configure VITE_SUPABASE_URL or check your network.",
+    stderr: `Remote execution unavailable for '${language}'. Configure VITE_SUPABASE_URL or check your network.`,
     exitCode: 1,
+    language,
   };
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useAgentPipeline(projectId?: string) {
-  const [agentState, setAgentState] = useState<AgentState>("idle");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [steps, setSteps] = useState<PlanStep[]>([]);
-  const [activeStepId, setActiveStepId] = useState<string | undefined>();
-  const [files, setFiles] = useState<CodeFile[]>([]);
-  const [activeFileId, setActiveFileId] = useState<string>("1");
-  const [consoleLines, setConsoleLines] = useState<ConsoleLine[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [agentState,          setAgentState]          = useState<AgentState>("idle");
+  const [messages,            setMessages]            = useState<ChatMessage[]>([]);
+  const [steps,               setSteps]               = useState<PlanStep[]>([]);
+  const [activeStepId,        setActiveStepId]        = useState<string | undefined>();
+  const [files,               setFiles]               = useState<CodeFile[]>([]);
+  const [activeFileId,        setActiveFileId]        = useState<string>("1");
+  const [consoleLines,        setConsoleLines]        = useState<ConsoleLine[]>([]);
+  const [isLoading,           setIsLoading]           = useState(false);
+  const [lastExecutionResult, setLastExecutionResult] = useState<ExecutionResult | null>(null);
+
   const retryCountRef = useRef(0);
-  const abortRef = useRef<AbortController | null>(null);
+  const abortRef      = useRef<AbortController | null>(null);
+
   const updateProject = useUpdateProject();
-  const saveMessage = useSaveMessage();
-  const { user } = useAuth();
+  const saveMessage   = useSaveMessage();
+  const { user }      = useAuth();
   const { data: savedMessages } = useProjectMessages(projectId);
 
   useEffect(() => {
@@ -187,76 +208,61 @@ export function useAgentPipeline(projectId?: string) {
 
   const persistMessage = useCallback(
     (role: string, content: string, agent?: string) => {
-      if (
-        projectId &&
-        projectId !== "new" &&
-        projectId !== "demo" &&
-        user
-      ) {
-        saveMessage.mutate({
-          project_id: projectId,
-          user_id: user.id,
-          role,
-          agent,
-          content,
-        });
+      if (projectId && projectId !== "new" && projectId !== "demo" && user) {
+        saveMessage.mutate({ project_id: projectId, user_id: user.id, role, agent, content });
       }
     },
     [projectId, user, saveMessage],
   );
 
-  // ─── File management ───────────────────────────────────────────────────────
+  // ─── File management with full path support ─────────────────────────────────
 
-  const handleFileChange = useCallback((fileId: string, code: string) => {
-    setFiles((prev) =>
-      prev.map((f) => (f.id === fileId ? { ...f, code } : f)),
-    );
+  const detectLanguage = (filename: string): string => {
+    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    const map: Record<string, string> = {
+      js: 'javascript', jsx: 'react', ts: 'typescript', tsx: 'react',
+      py: 'python', html: 'html', css: 'css', json: 'json',
+      sh: 'bash', java: 'java', rb: 'ruby', go: 'go', rs: 'rust',
+      kt: 'kotlin', swift: 'swift', scala: 'scala', php: 'php', r: 'r',
+      cpp: 'cpp', c: 'c',
+    };
+    return map[ext] || 'text';
+  };
+
+  const handleCreateFile = useCallback((fullPath: string) => {
+    const parts = fullPath.split('/');
+    const filename = parts[parts.length - 1];
+    if (!filename) return;
+    const language = detectLanguage(filename);
+    const id = Date.now().toString();
+    setFiles((prev) => [...prev, { id, filename: fullPath, language, code: '' }]);
+    setActiveFileId(id);
   }, []);
 
-  const handleCreateFile = useCallback(
-    (filename: string, language: string) => {
-      const id = Date.now().toString();
-      setFiles((prev) => [...prev, { id, filename, language, code: "" }]);
-      setActiveFileId(id);
-    },
-    [],
-  );
+  const handleCreateFolder = useCallback((folderPath: string) => {
+    const id = `folder-${Date.now()}`;
+    setFiles((prev) => [...prev, { id, filename: `${folderPath}/.folder`, language: 'folder', code: '' }]);
+  }, []);
 
-  const handleRenameFile = useCallback(
-    (fileId: string, newName: string) => {
-      const ext = newName.split(".").pop()?.toLowerCase() ?? "";
-      const langMap: Record<string, string> = {
-        js: "javascript",
-        jsx: "react",
-        ts: "typescript",
-        tsx: "react",
-        py: "python",
-        html: "html",
-        css: "css",
-        json: "json",
-        sh: "bash",
-        java: "java",
-        rb: "ruby",
-        go: "go",
-        rs: "rust",
-      };
-      const language = langMap[ext] ?? "text";
-      setFiles((prev) =>
-        prev.map((f) =>
-          f.id === fileId ? { ...f, filename: newName, language } : f,
-        ),
-      );
-    },
-    [],
-  );
+  const handleFileChange = useCallback((fileId: string, code: string) => {
+    setFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, code } : f)));
+  }, []);
+
+  const handleRenameFile = useCallback((fileId: string, newName: string) => {
+    setFiles((prev) =>
+      prev.map((f) =>
+        f.id === fileId
+          ? { ...f, filename: newName, language: detectLanguage(newName) }
+          : f
+      )
+    );
+  }, []);
 
   const handleDeleteFile = useCallback(
     (fileId: string) => {
       setFiles((prev) => {
         const next = prev.filter((f) => f.id !== fileId);
-        if (activeFileId === fileId && next.length > 0) {
-          setActiveFileId(next[0].id);
-        }
+        if (activeFileId === fileId && next.length > 0) setActiveFileId(next[0].id);
         return next;
       });
     },
@@ -277,25 +283,26 @@ export function useAgentPipeline(projectId?: string) {
 
   function detectEffectiveLanguage(
     rawLang: string,
-    files: Array<{ filename: string; language: string; code: string }>,
+    codeFiles: Array<{ filename: string; language: string; code: string }>,
   ): string {
     const lang = rawLang.toLowerCase();
+
+    // Prioritise backend languages – they must NOT go to browser sandbox
+    if (BACKEND_LANGUAGES.includes(lang)) {
+      return lang;
+    }
+
     if (lang === "react" || lang === "jsx" || lang === "tsx") return "react";
 
     if (lang === "javascript" || lang === "typescript") {
-      const hasJsx = files.some(
-        (f) =>
-          /\breact\b/i.test(f.code) &&
-          /<[A-Z][A-Za-z]*[\s/>]/.test(f.code),
+      const hasJsx = codeFiles.some(
+        (f) => /\breact\b/i.test(f.code) && /<[A-Z][A-Za-z]*[\s/>]/.test(f.code),
       );
       if (hasJsx) return "react";
     }
 
-    const mainFile = files[0];
-    if (
-      mainFile?.filename.endsWith(".tsx") ||
-      mainFile?.filename.endsWith(".jsx")
-    )
+    const mainFile = codeFiles[0];
+    if (mainFile?.filename.endsWith(".tsx") || mainFile?.filename.endsWith(".jsx"))
       return "react";
 
     return lang;
@@ -308,6 +315,7 @@ export function useAgentPipeline(projectId?: string) {
     ): Promise<ExecutionResult> => {
       const effectiveLang = detectEffectiveLanguage(language, codeFiles);
 
+      // Browser execution for web languages
       if (isWebLanguage(effectiveLang)) {
         addConsole("info", `▸ Executing in browser sandbox (${effectiveLang})…`);
 
@@ -325,51 +333,47 @@ export function useAgentPipeline(projectId?: string) {
           codeToRun = mainFile.code;
         } else if (effectiveLang === "html" && codeFiles.length > 1) {
           codeToRun = bundleWebFiles(codeFiles);
-          execLang = "html";
+          execLang  = "html";
         } else {
           const mainFile =
-            codeFiles.find((f) => f.language === effectiveLang) ??
-            codeFiles[0];
+            codeFiles.find((f) => f.language === effectiveLang) ?? codeFiles[0];
           codeToRun = mainFile.code;
         }
 
         try {
           const result = await executeInBrowser(codeToRun, execLang);
-          addConsole(
-            "info",
-            `⚡ Browser execution complete (${result.executionTime})`,
-          );
-          return result;
+          addConsole("info", `⚡ Browser execution complete (${result.executionTime})`);
+          return { ...result, language: effectiveLang };
         } catch (e) {
           return {
             stdout: "",
             stderr: e instanceof Error ? e.message : "Execution failed",
             exitCode: 1,
+            language: effectiveLang,
           };
         }
       }
 
-      if (isBackendLanguage(effectiveLang)) {
-        addConsole("info", `▸ Sending to remote executor (${effectiveLang})…`);
-        try {
-          return await executeCodeRemote(codeFiles, effectiveLang);
-        } catch (e) {
-          return {
-            stdout: "",
-            stderr: e instanceof Error ? e.message : "Remote execution failed",
-            exitCode: 1,
-          };
-        }
-      }
-
-      addConsole("info", "▸ Simulating execution via AI…");
+      // Remote execution for all other languages (Java, Python, etc.)
+      addConsole("info", `▸ Sending to remote executor (${effectiveLang})…`);
       try {
-        return await executeCodeRemote(codeFiles, effectiveLang);
+        const result = await executeCodeRemote(codeFiles, effectiveLang);
+        if (result.isReal) {
+          addConsole("info", `⚡ Real execution via Piston (${effectiveLang})`);
+        } else {
+          addConsole("info", `⚡ AI simulation (${effectiveLang})`);
+        }
+        // Ensure we capture the output even if it's empty
+        if (result.exitCode === 0 && !result.stdout && !result.stderr) {
+          result.stdout = "Code executed successfully (no output)";
+        }
+        return result;
       } catch (e) {
         return {
           stdout: "",
-          stderr: e instanceof Error ? e.message : "Execution failed",
+          stderr: e instanceof Error ? e.message : "Remote execution failed",
           exitCode: 1,
+          language: effectiveLang,
         };
       }
     },
@@ -378,7 +382,7 @@ export function useAgentPipeline(projectId?: string) {
 
   const handleRunCode = useCallback(async () => {
     if (files.length === 0) return;
-    const lang = files[0]?.language ?? "javascript";
+    const lang      = files[0]?.language ?? "javascript";
     const codeFiles = files.map((f) => ({
       filename: f.filename,
       language: f.language,
@@ -388,29 +392,24 @@ export function useAgentPipeline(projectId?: string) {
     addConsole("info", "▸ Running code…");
     try {
       const result = await executeCode(codeFiles, lang);
+      setLastExecutionResult(result);
       addConsole(
         result.exitCode === 0 ? "stdout" : "stderr",
         result.exitCode === 0
-          ? result.stdout || "No output"
+          ? result.stdout || "✓ Execution successful"
           : result.stderr || "Unknown error",
       );
     } catch (e) {
-      addConsole(
-        "stderr",
-        `Execution error: ${e instanceof Error ? e.message : "Unknown"}`,
-      );
+      addConsole("stderr", `Execution error: ${e instanceof Error ? e.message : "Unknown"}`);
     }
   }, [files, executeCode, addConsole]);
 
-  // ─── Coder agent ──────────────────────────────────────────────────────────
+  // ─── Coder agent ───────────────────────────────────────────────────────────
 
   const runCoderAgent = useCallback(
     async (
       prompt: string,
-      plan: {
-        steps: Array<{ title: string; description?: string }>;
-        language: string;
-      },
+      plan: { steps: Array<{ title: string; description?: string }>; language: string },
       signal?: AbortSignal,
     ): Promise<{
       files: Array<{ filename: string; language: string; code: string }>;
@@ -426,11 +425,7 @@ export function useAgentPipeline(projectId?: string) {
           onDelta: () => {},
           onDone: (text) => {
             const parsed = parseCoderResponse(text);
-            addConsole(
-              "stdout",
-              `✓ Generated ${parsed.files.length} file(s)`,
-              "coder",
-            );
+            addConsole("stdout", `✓ Generated ${parsed.files.length} file(s)`, "coder");
 
             const codeFiles: CodeFile[] = parsed.files.map((f, i) => ({
               id: (i + 1).toString(),
@@ -467,8 +462,6 @@ export function useAgentPipeline(projectId?: string) {
     [addConsole, persistMessage],
   );
 
-  // ─── Debugger agent ───────────────────────────────────────────────────────
-
   const runDebuggerAgent = useCallback(
     async (
       prompt: string,
@@ -483,11 +476,7 @@ export function useAgentPipeline(projectId?: string) {
 
       const memoryContext = getMemoryContext(errorMsg, language);
       if (memoryContext) {
-        addConsole(
-          "info",
-          "▸ Found similar past fixes in agent memory",
-          "debugger",
-        );
+        addConsole("info", "▸ Found similar past fixes in agent memory", "debugger");
       }
 
       return new Promise<{
@@ -507,11 +496,7 @@ export function useAgentPipeline(projectId?: string) {
           onDelta: () => {},
           onDone: (text) => {
             const parsed = parseDebuggerResponse(text);
-            addConsole(
-              "agent",
-              `Diagnosis: ${parsed.diagnosis}`,
-              "debugger",
-            );
+            addConsole("agent", `Diagnosis: ${parsed.diagnosis}`, "debugger");
 
             if (parsed.fixes.length > 0) {
               addMemoryEntry({
@@ -556,14 +541,14 @@ export function useAgentPipeline(projectId?: string) {
     [addConsole, persistMessage],
   );
 
-  // ─── Main pipeline ────────────────────────────────────────────────────────
+  // ─── Main pipeline ─────────────────────────────────────────────────────────
 
   const handleSendMessage = useCallback(
     async (content: string) => {
       if (abortRef.current) abortRef.current.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-      const { signal } = controller;
+      const controller   = new AbortController();
+      abortRef.current   = controller;
+      const { signal }   = controller;
 
       const userMsg: ChatMessage = {
         id: Date.now().toString(),
@@ -575,16 +560,12 @@ export function useAgentPipeline(projectId?: string) {
       persistMessage("user", content);
       setIsLoading(true);
       retryCountRef.current = 0;
+      setLastExecutionResult(null);
 
       try {
-        // 1. PLANNER
         setAgentState("planning");
         addConsole("info", "▸ Starting agent pipeline…");
-        addConsole(
-          "agent",
-          `Analyzing: "${content.substring(0, 80)}"`,
-          "planner",
-        );
+        addConsole("agent", `Analyzing: "${content.substring(0, 80)}"`, "planner");
 
         const plan = await callPlannerAgent(content, signal);
 
@@ -597,11 +578,7 @@ export function useAgentPipeline(projectId?: string) {
         setSteps(planSteps);
         setActiveStepId("1");
 
-        addConsole(
-          "agent",
-          `Generated ${plan.steps.length}-step plan (${plan.language})`,
-          "planner",
-        );
+        addConsole("agent", `Generated ${plan.steps.length}-step plan (${plan.language})`, "planner");
 
         const planMsg = `**Plan created** — ${plan.steps.length} steps using **${plan.language}**\n\n${plan.summary}\n\n${plan.steps.map((s, i) => `${i + 1}. ${s.title}`).join("\n")}`;
         setMessages((prev) => [
@@ -615,27 +592,18 @@ export function useAgentPipeline(projectId?: string) {
           },
         ]);
         persistMessage("assistant", planMsg, "planner");
-
         setSteps((prev) =>
-          prev.map((s, i) =>
-            i === 0 ? { ...s, status: "in-progress" as const } : s,
-          ),
+          prev.map((s, i) => (i === 0 ? { ...s, status: "in-progress" as const } : s)),
         );
 
-        // 2. CODER
         const coderResult = await runCoderAgent(content, plan, signal);
-
         if (!coderResult) {
           setAgentState("error");
           setIsLoading(false);
           return;
         }
+        setSteps((prev) => prev.map((s) => ({ ...s, status: "done" as const })));
 
-        setSteps((prev) =>
-          prev.map((s) => ({ ...s, status: "done" as const })),
-        );
-
-        // 3. EXECUTE
         addConsole("info", "▸ Executing generated code…");
         setAgentState("coding");
 
@@ -645,10 +613,7 @@ export function useAgentPipeline(projectId?: string) {
         try {
           execResult = await executeCode(currentFiles, plan.language);
         } catch (err) {
-          addConsole(
-            "stderr",
-            `Execution error: ${err instanceof Error ? err.message : "Unknown error"}`,
-          );
+          addConsole("stderr", `Execution error: ${err instanceof Error ? err.message : "Unknown error"}`);
           setAgentState("error");
           setIsLoading(false);
           return;
@@ -661,28 +626,21 @@ export function useAgentPipeline(projectId?: string) {
             : execResult.stderr || "Unknown error",
         );
 
-        // 4. AUTO-DEBUG LOOP
+        setLastExecutionResult({ ...execResult, language: plan.language });
+
         const effectiveLang = plan.language.toLowerCase();
-        const isWeb = isWebLanguage(effectiveLang);
+        const isWeb         = isWebLanguage(effectiveLang);
 
         while (execResult.exitCode !== 0 && retryCountRef.current < 3) {
-          if (
-            isWeb &&
-            (execResult.stderr ?? "").toLowerCase().includes("timeout")
-          ) {
-            addConsole(
-              "info",
-              "▸ Timeout on visual page — treating as rendered successfully.",
-            );
+          if (isWeb && (execResult.stderr ?? "").toLowerCase().includes("timeout")) {
+            addConsole("info", "▸ Timeout on visual page — treating as rendered successfully.");
             execResult = { ...execResult, exitCode: 0 };
+            setLastExecutionResult({ ...execResult, exitCode: 0, language: plan.language });
             break;
           }
 
           retryCountRef.current++;
-          addConsole(
-            "info",
-            `▸ Error detected — auto-debug attempt ${retryCountRef.current}/3…`,
-          );
+          addConsole("info", `▸ Error detected — auto-debug attempt ${retryCountRef.current}/3…`);
 
           const debugResult = await runDebuggerAgent(
             content,
@@ -699,14 +657,17 @@ export function useAgentPipeline(projectId?: string) {
           }
 
           currentFiles = debugResult.fixes;
-
           addConsole("info", "▸ Re-executing fixed code…");
+
           try {
             execResult = await executeCode(currentFiles, plan.language);
           } catch (err) {
             addConsole("stderr", `Re-execution error: ${err instanceof Error ? err.message : "Unknown"}`);
             break;
           }
+
+          setLastExecutionResult({ ...execResult, language: plan.language });
+
           addConsole(
             execResult.exitCode === 0 ? "stdout" : "stderr",
             execResult.exitCode === 0
@@ -720,25 +681,17 @@ export function useAgentPipeline(projectId?: string) {
           addConsole("info", "▸ Pipeline complete ✓");
         } else {
           setAgentState("error");
-          addConsole(
-            "stderr",
-            "▸ Max retries reached — manual intervention needed.",
-          );
+          addConsole("stderr", "▸ Max retries reached — manual intervention needed.");
         }
 
-        // 5. PERSIST
-        if (
-          projectId &&
-          projectId !== "new" &&
-          projectId !== "demo"
-        ) {
+        if (projectId && projectId !== "new" && projectId !== "demo") {
           updateProject.mutate({
             id: projectId,
             title: content.substring(0, 60),
             description: content.substring(0, 200),
             language: plan.language,
-            plan: plan.steps as any,
-            generated_code: currentFiles as any,
+            plan: plan.steps as unknown[],
+            generated_code: currentFiles as unknown[],
           });
         }
       } catch (e) {
@@ -751,7 +704,6 @@ export function useAgentPipeline(projectId?: string) {
         setAgentState("error");
         addConsole("stderr", `Pipeline error: ${errMsg}`);
         toast.error(errMsg);
-
         setMessages((prev) => [
           ...prev,
           {
@@ -790,9 +742,11 @@ export function useAgentPipeline(projectId?: string) {
     setActiveFileId,
     consoleLines,
     isLoading,
+    lastExecutionResult,
     handleSendMessage,
     handleFileChange,
     handleCreateFile,
+    handleCreateFolder,
     handleRenameFile,
     handleDeleteFile,
     handleRestoreSnapshot,

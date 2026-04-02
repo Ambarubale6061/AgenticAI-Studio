@@ -6,18 +6,7 @@
 
 @layer base {
   :root {
-    /* New IDE color system */
-    --ide-sidebar: 220 22% 8%;
-    --ide-panel: 220 20% 11%;
-    --ide-tab-active: 220 20% 14%;
-    --ide-tab-inactive: 220 20% 10%;
-    --ide-accent-green: 150 70% 50%;
-    --ide-accent-yellow: 45 90% 60%;
-    --ide-accent-red: 0 75% 55%;
-    --ide-accent-blue: 210 90% 60%;
-    --ide-glow: 190 90% 50%;
-
-    /* Base colors (shadcn/ui) */
+    /* New Primary Color Palette */
     --background: 220 20% 10%;
     --foreground: 220 10% 90%;
     --card: 220 20% 12%;
@@ -37,30 +26,51 @@
     --border: 220 15% 20%;
     --input: 220 15% 20%;
     --ring: 190 90% 50%;
-
     --radius: 0.5rem;
 
-    /* Sidebar (if used) */
+    /* Custom IDE Tokens from Input */
+    --ide-sidebar: 220 22% 8%;
+    --ide-panel: 220 20% 11%;
+    --ide-tab-active: 220 20% 14%;
+    --ide-tab-inactive: 220 20% 10%;
+    --ide-accent-green: 150 70% 50%;
+    --ide-accent-yellow: 45 90% 60%;
+    --ide-accent-red: 0 75% 55%;
+    --ide-accent-blue: 210 90% 60%;
+    --ide-glow: 190 90% 50%;
+
+    /* Internal IDE Mappings */
+    --ide-bg: var(--background);
+    --ide-surface: var(--card);
+    --ide-elevated: var(--popover);
+    --ide-border: var(--border);
+    --ide-border-light: 220 15% 25%;
+    --ide-menubar: 220 25% 7%;
+
+    /* Sidebar tokens */
     --sidebar-background: var(--ide-sidebar);
-    --sidebar-foreground: 220 10% 80%;
+    --sidebar-foreground: var(--muted-foreground);
     --sidebar-primary: var(--primary);
     --sidebar-primary-foreground: var(--primary-foreground);
-    --sidebar-accent: 220 20% 14%;
-    --sidebar-accent-foreground: 220 10% 90%;
-    --sidebar-border: 220 15% 18%;
+    --sidebar-accent: var(--secondary);
+    --sidebar-accent-foreground: var(--foreground);
+    --sidebar-border: var(--border);
     --sidebar-ring: var(--ring);
 
-    /* Agent colors (using new accent variants) */
+    /* Agent/panel tokens */
     --agent-planner: var(--ide-accent-blue);
     --agent-coder: var(--ide-accent-green);
     --agent-debugger: var(--ide-accent-yellow);
     --agent-error: var(--ide-accent-red);
 
-    --panel-header: 220 20% 14%;
-    --panel-border: 220 15% 22%;
-    --terminal-bg: 220 22% 6%;
+    --panel-header: var(--ide-panel);
+    --panel-border: var(--border);
+    --terminal-bg: 220 25% 6%;
     --glow-green: var(--ide-accent-green);
     --glow-purple: var(--accent);
+
+    /* Status bar */
+    --status-bar-bg: 190 90% 35%; /* Darker version of primary */
   }
 }
 
@@ -81,7 +91,7 @@
   }
 }
 
-/* Custom scrollbar */
+/* ── Custom scrollbar ──────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -97,15 +107,207 @@
   background: hsl(var(--muted-foreground));
 }
 
-/* Glow effects */
+/* ── Glow effects ──────────────────────────────────────── */
 .glow-green {
   box-shadow: 0 0 20px -5px hsl(var(--glow-green) / 0.3);
 }
 .glow-purple {
   box-shadow: 0 0 20px -5px hsl(var(--glow-purple) / 0.3);
 }
+.glow-blue {
+  box-shadow: 0 0 20px -5px hsl(var(--primary) / 0.25);
+}
 
-/* Pulse animation for agent status */
+/* ── VS Code tab styles ────────────────────────────────── */
+.vscode-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px;
+  height: 35px;
+  font-size: 12px;
+  font-family: inherit;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--ide-tab-inactive));
+  border-right: 1px solid hsl(var(--border));
+  cursor: pointer;
+  transition: color 0.15s ease;
+  white-space: nowrap;
+}
+.vscode-tab:hover {
+  color: hsl(var(--foreground));
+}
+.vscode-tab.active {
+  color: hsl(var(--foreground));
+  background: hsl(var(--ide-tab-active));
+}
+.vscode-tab.active::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: hsl(var(--primary));
+}
+
+/* ── Menubar ───────────────────────────────────────────── */
+.vscode-menubar {
+  background: hsl(var(--ide-menubar));
+  border-bottom: 1px solid hsl(var(--border));
+  -webkit-app-region: drag;
+}
+.vscode-menubar button,
+.vscode-menubar a {
+  -webkit-app-region: no-drag;
+}
+
+/* ── Icon sidebar ──────────────────────────────────────── */
+.icon-sidebar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  color: hsl(var(--muted-foreground));
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+.icon-sidebar-btn:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--popover));
+}
+.icon-sidebar-btn.active {
+  color: hsl(var(--foreground));
+  border-left-color: hsl(var(--primary));
+  background: hsl(var(--popover));
+}
+
+/* ── Status bar ────────────────────────────────────────── */
+.vscode-statusbar {
+  height: 22px;
+  background: hsl(var(--status-bar-bg));
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 11px;
+  font-family: "JetBrains Mono", monospace;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  gap: 12px;
+  flex-shrink: 0;
+  border-top: none;
+}
+.vscode-statusbar span {
+  opacity: 0.85;
+  cursor: default;
+}
+.vscode-statusbar span:hover {
+  opacity: 1;
+}
+
+/* ── Chat panel cards ──────────────────────────────────── */
+.chat-action-card {
+  width: 100%;
+  padding: 14px 16px;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    background 0.2s,
+    transform 0.1s;
+}
+.chat-action-card:hover {
+  background: hsl(var(--secondary));
+  transform: translateY(-1px);
+}
+.chat-action-card.plan:hover {
+  border-color: hsl(var(--primary) / 0.5);
+}
+.chat-action-card.build:hover {
+  border-color: hsl(var(--accent) / 0.5);
+}
+
+/* ── Model selector ────────────────────────────────────── */
+.model-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  font-size: 11px;
+  background: hsl(var(--secondary));
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
+}
+.model-selector:hover {
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--ide-border-light));
+}
+
+/* ── Toggle switch ─────────────────────────────────────── */
+.auto-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+}
+.auto-toggle-track {
+  width: 28px;
+  height: 16px;
+  background: hsl(var(--primary));
+  border-radius: 8px;
+  position: relative;
+  transition: background 0.2s;
+}
+.auto-toggle-thumb {
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  width: 12px;
+  height: 12px;
+  background: white;
+  border-radius: 50%;
+  transition: right 0.2s;
+}
+
+/* ── File explorer tree ────────────────────────────────── */
+.file-tree-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 2px 4px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  border-radius: 4px;
+  transition:
+    background 0.1s,
+    color 0.1s;
+  white-space: nowrap;
+}
+.file-tree-item:hover {
+  background: hsl(var(--popover));
+  color: hsl(var(--foreground));
+}
+.file-tree-item.active {
+  background: hsl(var(--primary) / 0.15);
+  color: hsl(var(--foreground));
+}
+
+/* ── Animations ────────────────────────────────────────── */
 @keyframes agent-pulse {
   0%,
   100% {
@@ -119,7 +321,6 @@
   animation: agent-pulse 1.5s ease-in-out infinite;
 }
 
-/* Typing cursor */
 @keyframes blink-cursor {
   0%,
   100% {
@@ -133,4 +334,18 @@
   content: "▋";
   animation: blink-cursor 1s step-end infinite;
   color: hsl(var(--primary));
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-in {
+  animation: fadeIn 0.2s ease-out;
 }

@@ -86,7 +86,7 @@ export async function streamAgentResponse({
       }
     }
 
-    // Flush remaining
+    // Flush remaining buffer
     if (buffer.trim()) {
       for (let raw of buffer.split("\n")) {
         if (!raw) continue;
@@ -142,20 +142,92 @@ export async function callPlannerAgent(prompt: string, signal?: AbortSignal): Pr
   return resp.json();
 }
 
+// ─── Robust JSON extractor ────────────────────────────────────────────────────
+//
+// The LLM sometimes wraps its JSON response in markdown fences, adds intro text,
+// or uses slightly different fence styles. This tries several strategies in order
+// before falling back so we never silently dump everything to output.txt.
+
+function extractJson(raw: string): unknown {
+  // Strategy 1 — direct parse (already valid JSON)
+  try { return JSON.parse(raw.trim()); } catch { /* continue */ }
+
+  // Strategy 2 — strip ALL markdown fences then parse
+  try {
+    const stripped = raw
+      .replace(/^```[a-z]*\s*\n?/gm, "")   // opening fence (```json, ```, etc.)
+      .replace(/^```\s*$/gm, "")            // closing fence
+      .trim();
+    return JSON.parse(stripped);
+  } catch { /* continue */ }
+
+  // Strategy 3 — extract from first ```json … ``` block
+  try {
+    const fenceMatch = raw.match(/```(?:json)?\s*\n([\s\S]*?)```/);
+    if (fenceMatch) return JSON.parse(fenceMatch[1].trim());
+  } catch { /* continue */ }
+
+  // Strategy 4 — find the outermost { … } in the text
+  // (handles "Here is the output:\n{ ... }")
+  try {
+    const start = raw.indexOf("{");
+    const end   = raw.lastIndexOf("}");
+    if (start !== -1 && end > start) {
+      return JSON.parse(raw.slice(start, end + 1));
+    }
+  } catch { /* continue */ }
+
+  // All strategies failed
+  throw new Error("Could not extract JSON from LLM response");
+}
+
+// ─── Coder response parser ────────────────────────────────────────────────────
+
 export function parseCoderResponse(fullText: string): {
   files: Array<{ filename: string; language: string; code: string }>;
   explanation: string;
 } {
   try {
-    const cleaned = fullText.replace(/```json\s*\n?/g, "").replace(/```\s*$/g, "").trim();
-    return JSON.parse(cleaned);
-  } catch {
-    return {
-      files: [{ filename: "output.txt", language: "text", code: fullText }],
-      explanation: "Raw output from coder agent",
-    };
+    const parsed = extractJson(fullText) as any;
+
+    // Validate shape — must have a non-empty files array
+    if (
+      parsed &&
+      Array.isArray(parsed.files) &&
+      parsed.files.length > 0 &&
+      parsed.files.every(
+        (f: any) =>
+          typeof f.filename === "string" &&
+          typeof f.language === "string" &&
+          typeof f.code    === "string",
+      )
+    ) {
+      return {
+        files:       parsed.files,
+        explanation: parsed.explanation || "Code generated successfully.",
+      };
+    }
+
+    // Shape is wrong — log and fall through
+    console.warn("[parseCoderResponse] Unexpected shape:", parsed);
+  } catch (e) {
+    console.warn("[parseCoderResponse] parse failed:", e, "\nRaw text (first 500):", fullText.slice(0, 500));
   }
+
+  // Last-resort fallback — at least show the raw output rather than a silent failure
+  return {
+    files: [
+      {
+        filename: "output.txt",
+        language: "text",
+        code: fullText,
+      },
+    ],
+    explanation: "Raw output from coder agent — JSON parse failed. Check console for details.",
+  };
 }
+
+// ─── Debugger response parser ─────────────────────────────────────────────────
 
 export function parseDebuggerResponse(fullText: string): {
   diagnosis: string;
@@ -164,14 +236,26 @@ export function parseDebuggerResponse(fullText: string): {
   confidence: string;
 } {
   try {
-    const cleaned = fullText.replace(/```json\s*\n?/g, "").replace(/```\s*$/g, "").trim();
-    return JSON.parse(cleaned);
-  } catch {
-    return {
-      diagnosis: fullText,
-      fixes: [],
-      explanation: "Could not parse debugger response",
-      confidence: "low",
-    };
+    const parsed = extractJson(fullText) as any;
+
+    if (parsed && Array.isArray(parsed.fixes)) {
+      return {
+        diagnosis:   parsed.diagnosis   || "See explanation below.",
+        fixes:       parsed.fixes,
+        explanation: parsed.explanation || "Fix applied.",
+        confidence:  parsed.confidence  || "medium",
+      };
+    }
+
+    console.warn("[parseDebuggerResponse] Unexpected shape:", parsed);
+  } catch (e) {
+    console.warn("[parseDebuggerResponse] parse failed:", e);
   }
+
+  return {
+    diagnosis:   fullText.slice(0, 200),
+    fixes:       [],
+    explanation: "Could not parse debugger response.",
+    confidence:  "low",
+  };
 }
