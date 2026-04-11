@@ -11,14 +11,33 @@ export interface ExecutionResult {
 }
 
 // ─── Language routing ─────────────────────────────────────────────────────────
-
 export const WEB_LANGUAGES = [
-  "javascript", "html", "css", "typescript", "react", "jsx", "tsx",
+  "javascript",
+  "html",
+  "css",
+  "typescript",
+  "react",
+  "jsx",
+  "tsx",
 ];
 
 export const BACKEND_LANGUAGES = [
-  "python", "java", "node", "nodejs", "ruby", "go", "rust",
-  "cpp", "c", "bash", "shell", "kotlin", "swift", "scala", "php", "r",
+  "python",
+  "java",
+  "node",
+  "nodejs",
+  "ruby",
+  "go",
+  "rust",
+  "cpp",
+  "c",
+  "bash",
+  "shell",
+  "kotlin",
+  "swift",
+  "scala",
+  "php",
+  "r",
 ];
 
 export function canExecuteLocally(language: string): boolean {
@@ -26,7 +45,6 @@ export function canExecuteLocally(language: string): boolean {
 }
 
 // ─── Server-side file detection ───────────────────────────────────────────────
-
 const SERVER_PATTERNS: RegExp[] = [
   /\brequire\s*\(\s*['"](?:express|mongoose|stripe|pg|mysql2?|redis|sequelize|knex|prisma|typeorm|dotenv|path|fs|http|https|crypto|os|child_process|cluster|net|tls|stream|zlib|buffer|util|events|assert|querystring|url)['"]\s*\)/,
   /\bimport\s+.*?\bfrom\s+['"](?:express|mongoose|stripe|pg|mysql2?|redis|sequelize|knex|prisma|typeorm|dotenv)['"]/,
@@ -47,42 +65,62 @@ const SERVER_PATTERNS: RegExp[] = [
 ];
 
 const SERVER_FILENAMES = new Set([
-  "server.js", "server.ts", "app.js", "app.ts",
-  "database.js", "database.ts", "db.js", "db.ts",
-  "payment.js", "payment.ts",
-  "auth.js", "auth.ts",
-  "routes.js", "routes.ts",
-  "middleware.js", "middleware.ts",
-  "models.js", "models.ts",
-  "config.js", "config.ts",
+  "server.js",
+  "server.ts",
+  "app.js",
+  "app.ts",
+  "database.js",
+  "database.ts",
+  "db.js",
+  "db.ts",
+  "payment.js",
+  "payment.ts",
+  "auth.js",
+  "auth.ts",
+  "routes.js",
+  "routes.ts",
+  "middleware.js",
+  "middleware.ts",
+  "models.js",
+  "models.ts",
+  "config.js",
+  "config.ts",
 ]);
 
-export function isServerSideFile(file: { filename: string; code: string }): boolean {
+export function isServerSideFile(file: {
+  filename: string;
+  code: string;
+}): boolean {
   const base = file.filename.split("/").pop()?.toLowerCase() ?? "";
-
   if (SERVER_FILENAMES.has(base)) {
     if (base === "index.js" || base === "index.ts") {
       return SERVER_PATTERNS.some((p) => p.test(file.code));
     }
     return true;
   }
-
   return SERVER_PATTERNS.some((p) => p.test(file.code));
 }
 
 // ─── HTML sanitiser ───────────────────────────────────────────────────────────
-
 export function sanitizeHtml(html: string): string {
   return html
-    .replace(/<script[^>]+src=["'][^"']*\/src\/[^"']*["'][^>]*>\s*<\/script>/gi, "")
+    .replace(
+      /<script[^>]+src=["'][^"']*\/src\/[^"']*["'][^>]*>\s*<\/script>/gi,
+      "",
+    )
     .replace(/<link[^>]+href=["'][^"']*\/src\/[^"']*["'][^>]*\/?>/gi, "")
     .replace(/<link[^>]+href=["']\.\/[^"']*["'][^>]*\/?>/gi, "")
-    .replace(/<script[^>]+type=["']module["'][^>]+src=["'][^"']*["'][^>]*>\s*<\/script>/gi, "")
-    .replace(/^\s*import\s+.*?from\s+["'][./]+(?:src|components|pages|lib|hooks)[^"']*["'];?\s*$/gm, "");
+    .replace(
+      /<script[^>]+type=["']module["'][^>]+src=["'][^"']*["'][^>]*>\s*<\/script>/gi,
+      "",
+    )
+    .replace(
+      /^\s*import\s+.*?from\s+["'][./]+(?:src|components|pages|lib|hooks)[^"']*["'];?\s*$/gm,
+      "",
+    );
 }
 
-// ─── Shared postMessage bridge (inlined into each builder) ───────────────────
-
+// ─── Shared postMessage bridge ────────────────────────────────────────────────
 const BRIDGE_SCRIPT = `
 (function(){
   var _p = window.parent;
@@ -96,8 +134,6 @@ const BRIDGE_SCRIPT = `
 })();`;
 
 // ─── HTML page builders ───────────────────────────────────────────────────────
-
-/** React / JSX / TSX — Babel Standalone + React 18 UMD */
 function buildReactHtml(code: string): string {
   return `<!DOCTYPE html>
 <html>
@@ -137,7 +173,6 @@ function buildReactHtml(code: string): string {
 </html>`;
 }
 
-/** TypeScript — Babel Standalone with typescript preset (no regex stripping) */
 function buildTsHtml(code: string): string {
   return `<!DOCTYPE html>
 <html>
@@ -159,7 +194,7 @@ function buildTsHtml(code: string): string {
   <script>
     var _out=document.getElementById('console-output');
     var _origLog=console.log,_origErr=console.error;
-    var _write=function(color,args){var line=document.createElement('span');line.style.color=color;line.textContent=args+'\n';_out.appendChild(line);};
+    var _write=function(color,args){var line=document.createElement('span');line.style.color=color;line.textContent=args+'\\n';_out.appendChild(line);};
     console.log=function(){var s=Array.from(arguments).map(function(a){return typeof a==='object'?JSON.stringify(a,null,2):String(a);}).join(' ');_write('#a0aec0',s);_origLog.apply(console,arguments);};
     console.error=function(){var s=Array.from(arguments).join(' ');_write('#fc8181',s);_origErr.apply(console,arguments);};
   </script>
@@ -176,7 +211,6 @@ function buildTsHtml(code: string): string {
 </html>`;
 }
 
-/** Plain JavaScript */
 function buildJsHtml(code: string): string {
   return `<!DOCTYPE html>
 <html>
@@ -197,7 +231,7 @@ function buildJsHtml(code: string): string {
   <script>
     var _out=document.getElementById('console-output');
     var _origLog=console.log,_origErr=console.error;
-    var _write=function(color,args){var line=document.createElement('span');line.style.color=color;line.textContent=args+'\n';_out.appendChild(line);};
+    var _write=function(color,args){var line=document.createElement('span');line.style.color=color;line.textContent=args+'\\n';_out.appendChild(line);};
     var __prevLog=console.log,__prevErr=console.error;
     console.log=function(){var s=Array.from(arguments).map(function(a){return typeof a==='object'?JSON.stringify(a,null,2):String(a);}).join(' ');_write('#a0aec0',s);__prevLog.apply(console,arguments);};
     console.error=function(){var s=Array.from(arguments).join(' ');_write('#fc8181',s);__prevErr.apply(console,arguments);};
@@ -210,12 +244,9 @@ function buildJsHtml(code: string): string {
 </html>`;
 }
 
-/** Full HTML page — injects bridge, sanitises paths */
 function buildFullHtml(rawHtml: string): string {
   let html = sanitizeHtml(rawHtml);
-
   const bridge = `<script>${BRIDGE_SCRIPT}setTimeout(function(){window.parent.postMessage({type:'done'},'*');},800);</script>`;
-
   if (html.includes("</body>")) {
     html = html.replace(/<\/body>/i, bridge + "</body>");
   } else if (html.includes("</html>")) {
@@ -226,7 +257,6 @@ function buildFullHtml(rawHtml: string): string {
   return html;
 }
 
-/** CSS-only */
 function buildCssHtml(css: string): string {
   return `<!DOCTYPE html>
 <html>
@@ -246,7 +276,6 @@ function buildCssHtml(css: string): string {
 }
 
 // ─── Main browser executor ────────────────────────────────────────────────────
-
 export function executeInBrowser(
   code: string,
   language: string,
@@ -259,16 +288,24 @@ export function executeInBrowser(
     const lang = language.toLowerCase();
 
     const isVisualLang =
-      lang === "html" || lang === "react" || lang === "jsx" ||
-      lang === "tsx" || lang === "css";
+      lang === "html" ||
+      lang === "react" ||
+      lang === "jsx" ||
+      lang === "tsx" ||
+      lang === "css";
 
     const iframe = document.createElement("iframe");
     iframe.sandbox.add("allow-scripts");
-    iframe.style.cssText = "display:none;position:fixed;top:-9999px;left:-9999px;";
+    iframe.style.cssText =
+      "display:none;position:fixed;top:-9999px;left:-9999px;";
     document.body.appendChild(iframe);
 
     const cleanup = () => {
-      try { document.body.removeChild(iframe); } catch { /* already removed */ }
+      try {
+        document.body.removeChild(iframe);
+      } catch {
+        /* already removed */
+      }
     };
 
     let finished = false;
@@ -294,7 +331,9 @@ export function executeInBrowser(
 
       cleanup();
       resolve({
-        stdout: logs.join("\n") || (errors.length === 0 ? "Code executed successfully (no output)" : ""),
+        stdout:
+          logs.join("\n") ||
+          (errors.length === 0 ? "Code executed successfully (no output)" : ""),
         stderr: errors.join("\n"),
         exitCode: errors.length > 0 ? 1 : 0,
         executionTime: elapsed,
@@ -352,13 +391,12 @@ export function executeInBrowser(
   });
 }
 
-// ─── Multi-file bundler (used by PreviewPanel) ────────────────────────────────
-
+// ─── Multi-file bundler (FIXED for multi‑component React projects) ────────────
 export function bundleWebFiles(
   files: Array<{ filename: string; language: string; code: string }>,
 ): string {
   const browserFiles = files.filter((f) => !isServerSideFile(f));
-  const serverFiles  = files.filter((f) =>  isServerSideFile(f));
+  const serverFiles = files.filter((f) => isServerSideFile(f));
 
   if (browserFiles.length === 0) {
     const fileList = serverFiles.map((f) => `• ${f.filename}`).join("\n");
@@ -382,13 +420,19 @@ export function bundleWebFiles(
   }
 
   const htmlFile = browserFiles.find(
-    (f) => f.language === "html" || f.filename.endsWith(".html") || f.filename.endsWith(".htm"),
+    (f) =>
+      f.language === "html" ||
+      f.filename.endsWith(".html") ||
+      f.filename.endsWith(".htm"),
   );
   const cssFiles = browserFiles.filter(
     (f) => f.language === "css" || f.filename.endsWith(".css"),
   );
   const tsxFiles = browserFiles.filter(
-    (f) => f.language === "react" || f.filename.endsWith(".tsx") || f.filename.endsWith(".jsx"),
+    (f) =>
+      f.language === "react" ||
+      f.filename.endsWith(".tsx") ||
+      f.filename.endsWith(".jsx"),
   );
   const tsFiles = browserFiles.filter(
     (f) => f.language === "typescript" || f.filename.endsWith(".ts"),
@@ -400,13 +444,82 @@ export function bundleWebFiles(
       !f.filename.endsWith(".spec.js"),
   );
 
-  // If there are React/TSX files, use Babel bundle
+  // ─── React / JSX / TSX: bundle all components together ──────────────────────
   if (tsxFiles.length > 0) {
-    const mainFile = tsxFiles[0];
     const inlineCss = cssFiles.map((f) => f.code).join("\n");
-    return buildReactBundle(mainFile.code, inlineCss);
+
+    // Sort files: put App.jsx / index.jsx first, then others
+    const mainPattern = /(App|index)\.(jsx|tsx)$/i;
+    const mainFiles = tsxFiles.filter((f) => mainPattern.test(f.filename));
+    const otherFiles = tsxFiles.filter((f) => !mainPattern.test(f.filename));
+    const orderedFiles = [...mainFiles, ...otherFiles];
+
+    // Concatenate code with file comments for debugging
+    const combinedCode = orderedFiles
+      .map((f) => `// === ${f.filename} ===\n${f.code}`)
+      .join("\n\n");
+
+    return buildReactBundle(combinedCode, inlineCss);
   }
 
+  // ─── TypeScript (non‑React) ─────────────────────────────────────────────────
+  if (tsFiles.length > 0) {
+    const tsCode = tsFiles
+      .map((f) => `// === ${f.filename} ===\n${f.code}`)
+      .join("\n\n");
+    const styleTag =
+      cssFiles.length > 0
+        ? `<style>\n${cssFiles.map((f) => f.code).join("\n\n")}\n</style>`
+        : "";
+    const babelTag = `<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script><script type="text/babel" data-presets="typescript">\n${tsCode}\n</script>`;
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  ${styleTag}
+  <style>
+    body{font-family:system-ui,sans-serif;background:#0f1117;color:#e2e8f0;margin:0;padding:16px}
+    #console-output{background:#1a1e2e;border:1px solid #2d3348;border-radius:8px;padding:12px;font-family:monospace;font-size:13px;white-space:pre-wrap;min-height:40px}
+    .console-label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#4a5568;margin-bottom:4px}
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div class="console-label">Console</div>
+  <pre id="console-output"></pre>
+  <script>${BRIDGE_SCRIPT}</script>
+  ${babelTag}
+</body>
+</html>`;
+  }
+
+  // ─── Plain JavaScript ───────────────────────────────────────────────────────
+  if (jsFiles.length > 0) {
+    const jsCode = jsFiles
+      .map((f) => `// === ${f.filename} ===\n${f.code}`)
+      .join("\n\n");
+    const styleTag =
+      cssFiles.length > 0
+        ? `<style>\n${cssFiles.map((f) => f.code).join("\n\n")}\n</style>`
+        : "";
+    const scriptTag = `<script>\n${jsCode}\n</script>`;
+    let baseHtml = htmlFile
+      ? sanitizeHtml(htmlFile.code)
+      : "<!DOCTYPE html><html><head></head><body></body></html>";
+
+    if (styleTag) {
+      baseHtml = baseHtml.includes("</head>")
+        ? baseHtml.replace(/<\/head>/i, styleTag + "</head>")
+        : styleTag + baseHtml;
+    }
+    baseHtml = baseHtml.includes("</body>")
+      ? baseHtml.replace(/<\/body>/i, scriptTag + "</body>")
+      : baseHtml + scriptTag;
+    return baseHtml;
+  }
+
+  // ─── HTML only (with CSS) ───────────────────────────────────────────────────
   let baseHtml = htmlFile
     ? sanitizeHtml(htmlFile.code)
     : "<!DOCTYPE html><html><head></head><body></body></html>";
@@ -418,28 +531,11 @@ export function bundleWebFiles(
       : styleTag + baseHtml;
   }
 
-  // TypeScript: use Babel
-  if (tsFiles.length > 0) {
-    const tsCode = tsFiles.map((f) => f.code).join("\n\n");
-    const babelTag = `<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script><script type="text/babel" data-presets="typescript">\n${tsCode}\n</script>`;
-    baseHtml = baseHtml.includes("</body>")
-      ? baseHtml.replace(/<\/body>/i, babelTag + "</body>")
-      : baseHtml + babelTag;
-    return baseHtml;
-  }
-
-  if (jsFiles.length > 0) {
-    const scriptTag = `<script>\n${jsFiles.map((f) => f.code).join("\n\n")}\n</script>`;
-    baseHtml = baseHtml.includes("</body>")
-      ? baseHtml.replace(/<\/body>/i, scriptTag + "</body>")
-      : baseHtml + scriptTag;
-  }
-
   return baseHtml;
 }
 
-/** Babel-based bundle for multi-file React projects */
-function buildReactBundle(mainCode: string, inlineCss: string): string {
+/** Babel-based bundle for multi‑file React projects */
+function buildReactBundle(combinedCode: string, inlineCss: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -457,13 +553,16 @@ function buildReactBundle(mainCode: string, inlineCss: string): string {
 </head>
 <body>
   <div id="root"></div>
+  <script>${BRIDGE_SCRIPT}</script>
   <script type="text/babel" data-presets="react,typescript">
     window.onerror=function(_m,_s,_l,_c,err){document.getElementById('root').innerHTML='<div id="preview-error">'+(err?err.message:_m)+'</div>';return true;};
     try{
-      ${mainCode}
+      ${combinedCode}
       var _root=document.getElementById('root');
       if(typeof App!=='undefined'){ReactDOM.createRoot(_root).render(React.createElement(App));}
+      else if(typeof default_1 !== 'undefined'){ReactDOM.createRoot(_root).render(React.createElement(default_1));}
     }catch(e){document.getElementById('root').innerHTML='<div id="preview-error">'+e.name+': '+e.message+'</div>';}
+    setTimeout(function(){ window.parent.postMessage({type:'done'},'*'); }, 600);
   </script>
 </body>
 </html>`;

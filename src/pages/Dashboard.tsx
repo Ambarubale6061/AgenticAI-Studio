@@ -1,3 +1,4 @@
+// src/pages/Dashboard.tsx
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Plus, Search, Clock, Code2, Trash2, Pencil, MoreHorizontal, Copy, Download } from "lucide-react";
@@ -36,7 +37,9 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { ProfileCard } from "@/components/ProfileCard";
 
-// Custom logo SVG component
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
+
+// Custom logo SVG component (unchanged)
 const Logo = ({ className = "h-5 w-5" }: { className?: string }) => (
   <svg className={className} viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
     <rect width="40" height="40" rx="8" fill="url(#gradient)" />
@@ -73,12 +76,24 @@ const Dashboard = () => {
     navigate(`/workspace/${project.id}`);
   };
 
+  // Updated: use backend API for delete
   const handleDelete = async () => {
     if (!deleteId) return;
-    const { error } = await supabase.from("projects").delete().eq("id", deleteId);
-    if (error) toast.error(error.message);
-    else { toast.success("Project deleted"); refetch(); }
-    setDeleteId(null);
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      const res = await fetch(`${API_BASE}/projects/${deleteId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Failed to delete project");
+      toast.success("Project deleted");
+      refetch();
+    } catch (error: any) {
+      toast.error(error.message || "Delete failed");
+    } finally {
+      setDeleteId(null);
+    }
   };
 
   const handleDuplicate = async (project: typeof projects[0]) => {
@@ -96,7 +111,7 @@ const Dashboard = () => {
   const handleExport = (project: typeof projects[0]) => {
     const files = (project.generated_code as any[]) || [];
     if (files.length === 0) { toast.error("No code to export"); return; }
-    const content = files.map((f: any) => `// === ${f.filename} ===\n${f.content}`).join("\n\n");
+    const content = files.map((f: any) => `// === ${f.filename} ===\n${f.content || f.code || ''}`).join("\n\n");
     const blob = new Blob([content], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -123,7 +138,6 @@ const Dashboard = () => {
         </div>
       </nav>
 
-      {/* rest of dashboard unchanged */}
       <div className="relative z-10 container mx-auto px-4 py-8 max-w-6xl">
         <div className="flex flex-col lg:flex-row gap-8">
           <div className="flex-1">
@@ -146,59 +160,67 @@ const Dashboard = () => {
               <div className="text-center py-12 text-muted-foreground animate-pulse">Loading projects...</div>
             ) : (
               <div className="space-y-3">
-                {filtered.map(project => (
-                  <div
-                    key={project.id}
-                    className="rounded-xl border border-border/50 bg-card/50 backdrop-blur-sm hover:bg-secondary/30 p-4 transition-all group hover:border-primary/20 cursor-pointer"
-                    onClick={() => navigate(`/workspace/${project.id}`)}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="font-bold truncate">{project.title}</h3>
-                          <Badge variant="outline" className="text-xs shrink-0 border-border/50">{project.language}</Badge>
-                          <Badge
-                            variant="outline"
-                            className={`text-xs shrink-0 ${project.status === 'active' ? 'border-[hsl(var(--ide-accent-green))]/30 text-[hsl(var(--ide-accent-green))]' : 'border-border/50'}`}
-                          >
-                            {project.status}
-                          </Badge>
+                {filtered.map(project => {
+                  // Safe date handling
+                  const updatedAt = project.updated_at ? new Date(project.updated_at) : new Date();
+                  const isValidDate = !isNaN(updatedAt.getTime());
+                  return (
+                    <div
+                      key={project.id}
+                      className="rounded-xl border border-border/50 bg-card/50 backdrop-blur-sm hover:bg-secondary/30 p-4 transition-all group hover:border-primary/20 cursor-pointer"
+                      onClick={() => navigate(`/workspace/${project.id}`)}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h3 className="font-bold truncate">{project.title}</h3>
+                            <Badge variant="outline" className="text-xs shrink-0 border-border/50">{project.language}</Badge>
+                            <Badge
+                              variant="outline"
+                              className={`text-xs shrink-0 ${project.status === 'active' ? 'border-[hsl(var(--ide-accent-green))]/30 text-[hsl(var(--ide-accent-green))]' : 'border-border/50'}`}
+                            >
+                              {project.status}
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground truncate">{project.description || "No description"}</p>
+                          <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" />{" "}
+                              {isValidDate
+                                ? formatDistanceToNow(updatedAt, { addSuffix: true })
+                                : "Just now"}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Code2 className="h-3 w-3" /> {(project.plan as any[])?.length || 0} steps
+                            </span>
+                          </div>
                         </div>
-                        <p className="text-sm text-muted-foreground truncate">{project.description || "No description"}</p>
-                        <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <Clock className="h-3 w-3" /> {formatDistanceToNow(new Date(project.updated_at), { addSuffix: true })}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <Code2 className="h-3 w-3" /> {(project.plan as any[])?.length || 0} steps
-                          </span>
-                        </div>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                            <button className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground opacity-0 group-hover:opacity-100 transition-all">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                            <DropdownMenuItem onClick={() => setEditProject({ id: project.id, title: project.title, description: project.description || "" })}>
+                              <Pencil className="h-4 w-4 mr-2" /> Rename / Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleDuplicate(project)}>
+                              <Copy className="h-4 w-4 mr-2" /> Duplicate
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleExport(project)}>
+                              <Download className="h-4 w-4 mr-2" /> Export Code
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => setDeleteId(project.id)}>
+                              <Trash2 className="h-4 w-4 mr-2" /> Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                          <button className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground opacity-0 group-hover:opacity-100 transition-all">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                          <DropdownMenuItem onClick={() => setEditProject({ id: project.id, title: project.title, description: project.description || "" })}>
-                            <Pencil className="h-4 w-4 mr-2" /> Rename / Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleDuplicate(project)}>
-                            <Copy className="h-4 w-4 mr-2" /> Duplicate
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleExport(project)}>
-                            <Download className="h-4 w-4 mr-2" /> Export Code
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => setDeleteId(project.id)}>
-                            <Trash2 className="h-4 w-4 mr-2" /> Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {filtered.length === 0 && !isLoading && (
                   <div className="text-center py-16 text-muted-foreground">
                     <Logo className="h-10 w-10 mx-auto mb-3 opacity-30" />

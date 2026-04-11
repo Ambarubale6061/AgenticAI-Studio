@@ -1,6 +1,45 @@
+// src/hooks/useProjects.ts
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
+let isRedirecting = false;
+
+async function fetchWithAuth(endpoint: string, options: RequestInit = {}, retry = true) {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Not authenticated");
+
+  const res = await fetch(`${API_BASE}${endpoint}`, {
+    ...options,
+    headers: {
+      ...options.headers,
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (res.status === 401) {
+    if (retry) {
+      await new Promise(r => setTimeout(r, 1000));
+      return fetchWithAuth(endpoint, options, false);
+    }
+    if (!isRedirecting) {
+      isRedirecting = true;
+      await supabase.auth.signOut();
+      window.location.href = "/login";
+    }
+    throw new Error("Session expired");
+  }
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ message: "Request failed" }));
+    throw new Error(error.message || "Request failed");
+  }
+
+  return res.json();
+}
 
 export interface Project {
   id: string;
@@ -20,14 +59,7 @@ export function useProjects() {
   return useQuery({
     queryKey: ["projects", user?.id],
     enabled: !!user,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("projects")
-        .select("*")
-        .order("updated_at", { ascending: false });
-      if (error) throw error;
-      return data as Project[];
-    },
+    queryFn: () => fetchWithAuth("/projects"),
   });
 }
 
@@ -35,32 +67,21 @@ export function useProject(id: string | undefined) {
   const { user } = useAuth();
   return useQuery({
     queryKey: ["project", id],
-    enabled: !!user && !!id && id !== "new",
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("projects")
-        .select("*")
-        .eq("id", id!)
-        .single();
-      if (error) throw error;
-      return data as Project;
+    enabled: !!user && !!id && id !== "new" && id !== "demo",
+    queryFn: () => {
+      if (!id || id === "new" || id === "demo") {
+        return Promise.reject("Invalid project ID");
+      }
+      return fetchWithAuth(`/projects/${id}`);
     },
   });
 }
 
 export function useCreateProject() {
   const queryClient = useQueryClient();
-  const { user } = useAuth();
   return useMutation({
-    mutationFn: async (input: { title?: string; description?: string }) => {
-      const { data, error } = await supabase
-        .from("projects")
-        .insert({ user_id: user!.id, title: input.title || "Untitled Project", description: input.description || "" })
-        .select()
-        .single();
-      if (error) throw error;
-      return data as Project;
-    },
+    mutationFn: (input: { title?: string; description?: string }) =>
+      fetchWithAuth("/projects", { method: "POST", body: JSON.stringify(input) }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects"] }),
   });
 }
@@ -68,12 +89,11 @@ export function useCreateProject() {
 export function useUpdateProject() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<Project> & { id: string }) => {
-      const { error } = await supabase
-        .from("projects")
-        .update({ ...updates, updated_at: new Date().toISOString() })
-        .eq("id", id);
-      if (error) throw error;
+    mutationFn: ({ id, ...updates }: Partial<Project> & { id: string }) => {
+      if (!id || id === "new" || id === "demo") {
+        return Promise.reject("Invalid project ID");
+      }
+      return fetchWithAuth(`/projects/${id}`, { method: "PUT", body: JSON.stringify(updates) });
     },
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
@@ -83,17 +103,15 @@ export function useUpdateProject() {
 }
 
 export function useProjectMessages(projectId: string | undefined) {
+  const { user } = useAuth();
   return useQuery({
     queryKey: ["messages", projectId],
-    enabled: !!projectId && projectId !== "new",
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("messages")
-        .select("*")
-        .eq("project_id", projectId!)
-        .order("created_at", { ascending: true });
-      if (error) throw error;
-      return data;
+    enabled: !!user && !!projectId && projectId !== "new" && projectId !== "demo",
+    queryFn: () => {
+      if (!projectId || projectId === "new" || projectId === "demo") {
+        return Promise.reject("Invalid project ID");
+      }
+      return fetchWithAuth(`/projects/${projectId}/messages`);
     },
   });
 }
@@ -101,9 +119,11 @@ export function useProjectMessages(projectId: string | undefined) {
 export function useSaveMessage() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (msg: { project_id: string; user_id: string; role: string; agent?: string; content: string }) => {
-      const { error } = await supabase.from("messages").insert(msg);
-      if (error) throw error;
+    mutationFn: (msg: { project_id: string; role: string; agent?: string; content: string }) => {
+      if (!msg.project_id || msg.project_id === "new" || msg.project_id === "demo") {
+        return Promise.reject("Invalid project ID");
+      }
+      return fetchWithAuth("/projects/messages", { method: "POST", body: JSON.stringify(msg) });
     },
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ["messages", vars.project_id] });

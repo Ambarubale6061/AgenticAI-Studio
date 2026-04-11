@@ -1,7 +1,7 @@
 // src/components/workspace/PreviewPanel.tsx
 
 import { useEffect, useRef, useState, useMemo } from "react";
-import { Eye, RefreshCw, AlertTriangle, Server, Terminal } from "lucide-react";
+import { Eye, RefreshCw, AlertTriangle, Server, Terminal, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import PanelHeader from "./PanelHeader";
 import type { CodeFile } from "./CodePanel";
@@ -160,30 +160,30 @@ function buildTerminalPage(result: ExecutionResult, files: CodeFile[]): string {
     ::-webkit-scrollbar{width:6px}
     ::-webkit-scrollbar-track{background:#0d1117}
     ::-webkit-scrollbar-thumb{background:#30363d;border-radius:3px}
-  <\/style>
-<\/head>
+  </style>
+</head>
 <body>
   <div class="header">
     <div class="dots">
-      <div class="dot dot-r"><\/div>
-      <div class="dot dot-y"><\/div>
-      <div class="dot dot-g"><\/div>
-    <\/div>
-    <div class="lang-badge">${meta.icon} ${lang}<\/div>
-    <span class="fname">${escHtml(fname)}<\/span>
+      <div class="dot dot-r"></div>
+      <div class="dot dot-y"></div>
+      <div class="dot dot-g"></div>
+    </div>
+    <div class="lang-badge">${meta.icon} ${lang}</div>
+    <span class="fname">${escHtml(fname)}</span>
     <div class="meta">
       ${execTime}
-      <span class="${success ? "exit-ok" : "exit-err"}">exit ${result.exitCode}<\/span>
-    <\/div>
-  <\/div>
+      <span class="${success ? "exit-ok" : "exit-err"}">exit ${result.exitCode}</span>
+    </div>
+  </div>
   <div class="terminal">
-    <div class="${bannerClass}">${bannerText}<\/div>
+    <div class="${bannerClass}">${bannerText}</div>
     ${stdoutHtml}
     ${stderrHtml}
     ${emptyHtml}
-  <\/div>
-<\/body>
-<\/html>`;
+  </div>
+</body>
+</html>`;
 }
 
 // ─── Language detection for web modes ────────────────────────────────────────
@@ -218,49 +218,7 @@ function detectMode(files: CodeFile[]): PreviewMode {
 // ─── Web preview builders ─────────────────────────────────────────────────────
 
 function buildReactPreview(files: CodeFile[]): string {
-  const browserFiles = files.filter((f) => !isServerSideFile(f));
-  const mainFile =
-    browserFiles.find((f) =>
-      f.filename.endsWith(".tsx") || f.filename.endsWith(".jsx") || f.language === "react",
-    ) ??
-    browserFiles.find((f) => ["javascript", "typescript"].includes(f.language)) ??
-    browserFiles[0];
-
-  const cssFiles  = browserFiles.filter((f) => f.language === "css");
-  const inlineCss = cssFiles.map((f) => f.code).join("\n");
-
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
-  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin><\/script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin><\/script>
-  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2/dist/tailwind.min.css" rel="stylesheet"/>
-  <style>
-    *{box-sizing:border-box}body{margin:0;padding:0;font-family:system-ui,sans-serif}
-    #preview-error{color:#f87171;background:#1a0a0a;border:1px solid #7f1d1d;border-radius:6px;padding:12px 16px;margin:16px;font-family:monospace;font-size:13px;white-space:pre-wrap}
-    ${inlineCss}
-  <\/style>
-<\/head>
-<body>
-  <div id="root"><\/div>
-  <script type="text/babel" data-presets="react,typescript">
-    window.onerror=function(_m,_s,_l,_c,err){
-      document.getElementById('root').innerHTML='<div id="preview-error">'+(err?err.message:_m)+'<\/div>';
-      return true;
-    };
-    try {
-      ${mainFile.code}
-      var _root=document.getElementById('root');
-      if(typeof App!=='undefined'){ReactDOM.createRoot(_root).render(React.createElement(App));}
-    } catch(e) {
-      document.getElementById('root').innerHTML='<div id="preview-error">'+e.name+': '+e.message+'<\/div>';
-    }
-  <\/script>
-<\/body>
-<\/html>`;
+  return bundleWebFiles(files);
 }
 
 function buildHtmlPreview(files: CodeFile[]): string {
@@ -273,19 +231,18 @@ function buildHtmlPreview(files: CodeFile[]): string {
   if (cssFiles.length > 0) {
     return `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"/>
-<style>body{margin:0;padding:0;font-family:system-ui,sans-serif}${cssFiles.map((f) => f.code).join("\n")}<\/style>
-<\/head><body>
+<style>body{margin:0;padding:0;font-family:system-ui,sans-serif}${cssFiles.map((f) => f.code).join("\n")}</style>
+</head><body>
   <div class="container">
-    <h1>CSS Preview<\/h1><p>Your styles have been applied.<\/p>
-    <button class="btn">Sample Button<\/button><div class="card"><span>Sample Card<\/span><\/div>
-  <\/div>
-<\/body><\/html>`;
+    <h1>CSS Preview</h1><p>Your styles have been applied.</p>
+    <button class="btn">Sample Button</button><div class="card"><span>Sample Card</span></div>
+  </div>
+</body></html>`;
   }
 
   return bundleWebFiles(files);
 }
 
-/** TypeScript preview — Babel renders it properly without regex stripping */
 function buildTsPreview(files: CodeFile[]): string {
   const browserFiles = files.filter((f) => !isServerSideFile(f));
   const cssFiles  = browserFiles.filter((f) => f.language === "css");
@@ -298,19 +255,19 @@ function buildTsPreview(files: CodeFile[]): string {
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
     body{font-family:system-ui,sans-serif;background:#0f1117;color:#e2e8f0;margin:0;padding:16px}
     #app{margin-bottom:16px}
     #console-output{background:#1a1e2e;border:1px solid #2d3348;border-radius:8px;padding:12px;font-family:monospace;font-size:13px;white-space:pre-wrap;min-height:40px;color:#a0aec0}
     .console-label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#4a5568;margin-bottom:4px}
     ${inlineCss}
-  <\/style>
-<\/head>
+  </style>
+</head>
 <body>
-  <div id="app"><\/div>
-  <div class="console-label">Console<\/div>
-  <pre id="console-output"><\/pre>
+  <div id="app"></div>
+  <div class="console-label">Console</div>
+  <pre id="console-output"></pre>
   <script type="text/babel" data-presets="typescript">
     var _out=document.getElementById('console-output');
     var _write=function(color,text){var span=document.createElement('span');span.style.color=color;span.textContent=text+'\\n';_out.appendChild(span);};
@@ -324,9 +281,9 @@ function buildTsPreview(files: CodeFile[]): string {
     } catch(e) {
       _write('#fc8181','✖ '+e.name+': '+e.message);
     }
-  <\/script>
-<\/body>
-<\/html>`;
+  </script>
+</body>
+</html>`;
 }
 
 function buildJsPreview(files: CodeFile[]): string {
@@ -347,12 +304,12 @@ function buildJsPreview(files: CodeFile[]): string {
     #console-output{background:#1a1e2e;border:1px solid #2d3348;border-radius:8px;padding:12px;font-family:monospace;font-size:13px;white-space:pre-wrap;min-height:40px;color:#a0aec0}
     .console-label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#4a5568;margin-bottom:4px}
     ${inlineCss}
-  <\/style>
-<\/head>
+  </style>
+</head>
 <body>
-  <div id="app"><\/div>
-  <div class="console-label">Console<\/div>
-  <pre id="console-output"><\/pre>
+  <div id="app"></div>
+  <div class="console-label">Console</div>
+  <pre id="console-output"></pre>
   <script>
     var _out=document.getElementById('console-output');
     var _write=function(color,text){var span=document.createElement('span');span.style.color=color;span.textContent=text+'\\n';_out.appendChild(span);};
@@ -364,9 +321,9 @@ function buildJsPreview(files: CodeFile[]): string {
     try {
 ${rawJs}
     } catch(e) { _write('#fc8181','✖ '+e.name+': '+e.message); }
-  <\/script>
-<\/body>
-<\/html>`;
+  </script>
+</body>
+</html>`;
 }
 
 function buildBackendPlaceholder(files: CodeFile[]): string {
@@ -382,16 +339,16 @@ function buildBackendPlaceholder(files: CodeFile[]): string {
   p{margin:0 0 16px;color:#94a3b8;font-size:14px;line-height:1.5}
   pre{background:#0f1117;border:1px solid #2d3348;border-radius:8px;padding:12px;font-size:12px;text-align:left;color:#64748b;white-space:pre-wrap}
   .hint{margin-top:12px;font-size:12px;color:#475569}
-<\/style><\/head>
+</style></head>
 <body>
   <div class="card">
-    <h2>⚙️ Backend Project<\/h2>
-    <p>This project runs server-side. Output will appear in the Console panel after execution.<\/p>
-    <pre>${fileList}<\/pre>
-    <p class="hint">Run the code to see results here.<\/p>
-  <\/div>
-<\/body>
-<\/html>`;
+    <h2>⚙️ Backend Project</h2>
+    <p>This project runs server-side. Output will appear in the Console panel after execution.</p>
+    <pre>${fileList}</pre>
+    <p class="hint">Run the code to see results here.</p>
+  </div>
+</body>
+</html>`;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -404,7 +361,6 @@ const PreviewPanel = ({ files, visible = true, executionResult }: PreviewPanelPr
 
   const mode = useMemo(() => detectMode(files), [files]);
 
-  // Decide which HTML to show
   const { previewHTML, isTerminal } = useMemo<{
     previewHTML: string | null;
     isTerminal: boolean;
@@ -413,7 +369,6 @@ const PreviewPanel = ({ files, visible = true, executionResult }: PreviewPanelPr
       return { previewHTML: null, isTerminal: false };
     }
 
-    // Web modes: show live visual preview regardless of executionResult
     try {
       switch (mode) {
         case "react":
@@ -425,13 +380,11 @@ const PreviewPanel = ({ files, visible = true, executionResult }: PreviewPanelPr
         case "js":
           return { previewHTML: buildJsPreview(files), isTerminal: false };
         case "backend":
-          // Show terminal if we have results, placeholder otherwise
           if (executionResult) {
             return { previewHTML: buildTerminalPage(executionResult, files), isTerminal: true };
           }
           return { previewHTML: buildBackendPlaceholder(files), isTerminal: false };
         case "none":
-          // No files but we have execution results → show terminal
           if (executionResult) {
             return { previewHTML: buildTerminalPage(executionResult, files), isTerminal: true };
           }
@@ -443,9 +396,8 @@ const PreviewPanel = ({ files, visible = true, executionResult }: PreviewPanelPr
     }
 
     return { previewHTML: null, isTerminal: false };
-  }, [files, mode, executionResult, refreshKey]);
+  }, [files, mode, executionResult]);
 
-  // Inject iframe srcDoc (React camelCase)
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe || !previewHTML) return;
@@ -454,7 +406,7 @@ const PreviewPanel = ({ files, visible = true, executionResult }: PreviewPanelPr
     setIframeError(null);
 
     try {
-      iframe.srcDoc = previewHTML;  // ✅ FIXED: was srcdoc, now srcDoc
+      iframe.srcdoc = previewHTML;
     } catch (e) {
       setIframeError(e instanceof Error ? e.message : "Unknown error");
     } finally {
@@ -462,9 +414,16 @@ const PreviewPanel = ({ files, visible = true, executionResult }: PreviewPanelPr
     }
   }, [previewHTML]);
 
+  const handleOpenInNewTab = () => {
+    if (!previewHTML) return;
+    const blob = new Blob([previewHTML], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+    URL.revokeObjectURL(url);
+  };
+
   if (!visible) return null;
 
-  // Empty state — nothing to show at all
   if (!previewHTML) {
     return (
       <div className="flex flex-col h-full">
@@ -480,7 +439,6 @@ const PreviewPanel = ({ files, visible = true, executionResult }: PreviewPanelPr
     );
   }
 
-  // ─── Mode badge ──────────────────────────────────────────────────────────────
   const modeBadge = (() => {
     if (isTerminal) {
       const lang = (executionResult?.language ?? files[0]?.language ?? "").toLowerCase();
@@ -514,6 +472,17 @@ const PreviewPanel = ({ files, visible = true, executionResult }: PreviewPanelPr
     <div className="flex flex-col h-full">
       <PanelHeader title="Preview" icon={Eye} iconColor="text-accent">
         {modeBadge}
+        {!isTerminal && previewHTML && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            title="Open in new tab (full‑screen)"
+            onClick={handleOpenInNewTab}
+          >
+            <ExternalLink className="h-3 w-3" />
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="icon"
@@ -539,7 +508,7 @@ const PreviewPanel = ({ files, visible = true, executionResult }: PreviewPanelPr
           sandbox="allow-scripts allow-modals"
           className="w-full h-full border-0"
           title="Preview"
-          srcDoc={previewHTML}  // ✅ FIXED: was srcdoc, now srcDoc
+          srcDoc={previewHTML}
         />
       </div>
     </div>

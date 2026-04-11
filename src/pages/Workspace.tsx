@@ -864,12 +864,20 @@ const Workspace = () => {
     if (lastExecutionResult) setShowPreview(true);
   }, [lastExecutionResult]);
 
-  const handleDemoSend = useCallback((content: string) => {
-    if (!isDemo) { wrappedHandleSendMessage(content); return; }
-    if (getDemoCount() >= DEMO_LIMIT) { setShowSignupWall(true); return; }
+const handleDemoSend = useCallback((content: string) => {
+  if (!user) {
+    setShowSignupWall(true);
+    return;
+  }
+  if (isDemo) {
+    if (getDemoCount() >= DEMO_LIMIT) {
+      setShowSignupWall(true);
+      return;
+    }
     incrementDemoCount();
-    wrappedHandleSendMessage(content);
-  }, [isDemo, wrappedHandleSendMessage]);
+  }
+  wrappedHandleSendMessage(content);
+}, [isDemo, user, wrappedHandleSendMessage]);
 
   const handleIconClick = (id: string) => {
     if (id === activeIconId && showSidebar) {
