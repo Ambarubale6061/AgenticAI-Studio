@@ -2,7 +2,7 @@
 
 <br />
 
-<img src="frontend/src/assets/ai.png" alt="AgenticAI Studio" width="72" />
+<img src="frontend/src/assets/ai.png" alt="AgenticAI Studio" width="100" />
 
 <h1>AgenticAI Studio</h1>
 
@@ -38,11 +38,11 @@ Everything runs in one place: Monaco editor, live preview iframe, console output
 
 ### 🔥 Hero Section
 
-![Hero](frontend\src\assets\ho.png)
+![Hero](frontend/src/assets/ho.png)
 
 ### 💻 IDE Workspace
 
-![IDE](frontend\src\assets\IDE.png)
+![IDE](frontend/src/assets/IDE.png)
 
 ---
 
