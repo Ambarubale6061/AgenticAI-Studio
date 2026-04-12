@@ -38,7 +38,7 @@ Everything runs in one place: Monaco editor, live preview iframe, console output
 
 ### 🔥 Hero Section
 
-![Hero](frontend\src\assets\ho.png)
+![Hero](frontend/src/assets/ho.png)
 
 ### 💻 IDE Workspace
 
