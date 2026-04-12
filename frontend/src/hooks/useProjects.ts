@@ -1,6 +1,4 @@
 // src/hooks/useProjects.ts
-// All project and message data is stored in Supabase and queried directly
-// from the frontend. No backend/Express involvement for data operations.
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
@@ -29,19 +27,25 @@ export interface Message {
   created_at: string;
 }
 
-// ─── Projects ─────────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────
+   PROJECTS
+──────────────────────────────────────────── */
 
 export function useProjects() {
   const { user } = useAuth();
+
   return useQuery({
     queryKey: ["projects", user?.id],
-    enabled: !!user,
+    enabled: !!user?.id,
     queryFn: async () => {
+      if (!user?.id) throw new Error("User not loaded");
+
       const { data, error } = await supabase
         .from("projects")
         .select("*")
-        .eq("user_id", user!.id)
+        .eq("user_id", user.id)
         .order("updated_at", { ascending: false });
+
       if (error) throw new Error(error.message);
       return data as Project[];
     },
@@ -50,32 +54,42 @@ export function useProjects() {
 
 export function useProject(id: string | undefined) {
   const { user } = useAuth();
+
   return useQuery({
     queryKey: ["project", id],
-    enabled: !!user && !!id && id !== "new" && id !== "demo",
+    enabled: !!user?.id && !!id && id !== "new" && id !== "demo",
     queryFn: async () => {
-      if (!id || id === "new" || id === "demo") throw new Error("Invalid project ID");
+      if (!user?.id || !id) throw new Error("Invalid request");
+
       const { data, error } = await supabase
         .from("projects")
         .select("*")
         .eq("id", id)
-        .eq("user_id", user!.id)
+        .eq("user_id", user.id)
         .single();
+
       if (error) throw new Error(error.message);
       return data as Project;
     },
   });
 }
 
+/* ─────────────────────────────────────────────
+   CREATE PROJECT
+──────────────────────────────────────────── */
+
 export function useCreateProject() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+
   return useMutation({
     mutationFn: async (input: { title?: string; description?: string }) => {
+      if (!user?.id) throw new Error("User not found");
+
       const { data, error } = await supabase
         .from("projects")
         .insert({
-          user_id: user!.id,
+          user_id: user.id,
           title: input.title || "Untitled Project",
           description: input.description || "",
           status: "idle",
@@ -85,29 +99,44 @@ export function useCreateProject() {
         })
         .select()
         .single();
+
       if (error) throw new Error(error.message);
       return data as Project;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects"] }),
+
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
   });
 }
+
+/* ─────────────────────────────────────────────
+   UPDATE PROJECT
+──────────────────────────────────────────── */
 
 export function useUpdateProject() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+
   return useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Project> & { id: string }) => {
-      if (!id || id === "new" || id === "demo") throw new Error("Invalid project ID");
+      if (!user?.id || !id) throw new Error("Invalid request");
+
       const { data, error } = await supabase
         .from("projects")
-        .update({ ...updates, updated_at: new Date().toISOString() })
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", id)
-        .eq("user_id", user!.id)
+        .eq("user_id", user.id)
         .select()
         .single();
+
       if (error) throw new Error(error.message);
       return data as Project;
     },
+
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       queryClient.invalidateQueries({ queryKey: ["project", vars.id] });
@@ -115,50 +144,68 @@ export function useUpdateProject() {
   });
 }
 
+/* ─────────────────────────────────────────────
+   DELETE PROJECT
+──────────────────────────────────────────── */
+
 export function useDeleteProject() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+
   return useMutation({
     mutationFn: async (id: string) => {
-      if (!id || id === "new" || id === "demo") throw new Error("Invalid project ID");
-      // Delete messages first (cascade not guaranteed on all setups)
+      if (!user?.id || !id) throw new Error("Invalid request");
+
       await supabase.from("messages").delete().eq("project_id", id);
+
       const { error } = await supabase
         .from("projects")
         .delete()
         .eq("id", id)
-        .eq("user_id", user!.id);
+        .eq("user_id", user.id);
+
       if (error) throw new Error(error.message);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects"] }),
+
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
   });
 }
 
-// ─── Messages ─────────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────
+   MESSAGES
+──────────────────────────────────────────── */
 
 export function useProjectMessages(projectId: string | undefined) {
   const { user } = useAuth();
+
   return useQuery({
     queryKey: ["messages", projectId],
-    enabled: !!user && !!projectId && projectId !== "new" && projectId !== "demo",
+    enabled: !!user?.id && !!projectId && projectId !== "new" && projectId !== "demo",
     queryFn: async () => {
-      if (!projectId || projectId === "new" || projectId === "demo") {
-        throw new Error("Invalid project ID");
-      }
+      if (!user?.id || !projectId) throw new Error("Invalid request");
+
       const { data, error } = await supabase
         .from("messages")
         .select("*")
         .eq("project_id", projectId)
         .order("created_at", { ascending: true });
+
       if (error) throw new Error(error.message);
       return data as Message[];
     },
   });
 }
 
+/* ─────────────────────────────────────────────
+   SAVE MESSAGE
+──────────────────────────────────────────── */
+
 export function useSaveMessage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+
   return useMutation({
     mutationFn: async (msg: {
       project_id: string;
@@ -166,19 +213,25 @@ export function useSaveMessage() {
       agent?: string;
       content: string;
     }) => {
-      if (!msg.project_id || msg.project_id === "new" || msg.project_id === "demo") {
-        throw new Error("Invalid project ID");
-      }
+      if (!user?.id) throw new Error("User not found");
+
       const { data, error } = await supabase
         .from("messages")
-        .insert({ ...msg, user_id: user!.id })
+        .insert({
+          ...msg,
+          user_id: user.id,
+        })
         .select()
         .single();
+
       if (error) throw new Error(error.message);
       return data as Message;
     },
+
     onSuccess: (_, vars) => {
-      queryClient.invalidateQueries({ queryKey: ["messages", vars.project_id] });
+      queryClient.invalidateQueries({
+        queryKey: ["messages", vars.project_id],
+      });
     },
   });
 }
