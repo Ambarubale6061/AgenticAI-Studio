@@ -1,8 +1,43 @@
 // src/hooks/useProjects.ts
+// ALL data operations now go through the Express/MongoDB backend.
+// Supabase is used ONLY for auth — getSession() here is just to get
+// the JWT access token that the backend's authMiddleware validates.
+
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
 
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
+
+// ─── Shared fetch helper ──────────────────────────────────────────────────────
+async function apiFetch<T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Not authenticated");
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(options.headers ?? {}),
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || `Request failed: ${res.status}`);
+  }
+
+  // 204 No Content — nothing to parse
+  if (res.status === 204) return undefined as T;
+  return res.json();
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 export interface Project {
   id: string;
   user_id: string;
@@ -10,9 +45,9 @@ export interface Project {
   description: string;
   language: string;
   status: string;
-  plan: any[];
-  generated_code: any[];
-  console_output: any[];
+  plan: unknown[];
+  generated_code: unknown[];
+  console_output: unknown[];
   created_at: string;
   updated_at: string;
 }
@@ -24,12 +59,10 @@ export interface Message {
   role: string;
   agent?: string;
   content: string;
-  created_at: string;
+  createdAt: string; // Mongoose timestamps use camelCase
 }
 
-/* ─────────────────────────────────────────────
-   PROJECTS
-──────────────────────────────────────────── */
+// ─── PROJECTS ─────────────────────────────────────────────────────────────────
 
 export function useProjects() {
   const { user } = useAuth();
@@ -37,18 +70,7 @@ export function useProjects() {
   return useQuery({
     queryKey: ["projects", user?.id],
     enabled: !!user?.id,
-    queryFn: async () => {
-      if (!user?.id) throw new Error("User not loaded");
-
-      const { data, error } = await supabase
-        .from("projects")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("updated_at", { ascending: false });
-
-      if (error) throw new Error(error.message);
-      return data as Project[];
-    },
+    queryFn: () => apiFetch<Project[]>("/api/projects"),
   });
 }
 
@@ -58,175 +80,101 @@ export function useProject(id: string | undefined) {
   return useQuery({
     queryKey: ["project", id],
     enabled: !!user?.id && !!id && id !== "new" && id !== "demo",
-    queryFn: async () => {
-      if (!user?.id || !id) throw new Error("Invalid request");
-
-      const { data, error } = await supabase
-        .from("projects")
-        .select("*")
-        .eq("id", id)
-        .eq("user_id", user.id)
-        .single();
-
-      if (error) throw new Error(error.message);
-      return data as Project;
-    },
+    queryFn: () => apiFetch<Project>(`/api/projects/${id}`),
   });
 }
 
-/* ─────────────────────────────────────────────
-   CREATE PROJECT
-──────────────────────────────────────────── */
+// ─── CREATE PROJECT ───────────────────────────────────────────────────────────
 
 export function useCreateProject() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
 
   return useMutation({
-    mutationFn: async (input: { title?: string; description?: string }) => {
-      if (!user?.id) throw new Error("User not found");
-
-      const { data, error } = await supabase
-        .from("projects")
-        .insert({
-          user_id: user.id,
+    mutationFn: (input: { title?: string; description?: string }) =>
+      apiFetch<Project>("/api/projects", {
+        method: "POST",
+        body: JSON.stringify({
           title: input.title || "Untitled Project",
           description: input.description || "",
-          status: "idle",
-          plan: [],
-          generated_code: [],
-          console_output: [],
-        })
-        .select()
-        .single();
-
-      if (error) throw new Error(error.message);
-      return data as Project;
-    },
+        }),
+      }),
 
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["projects", user?.id] });
     },
   });
 }
 
-/* ─────────────────────────────────────────────
-   UPDATE PROJECT
-──────────────────────────────────────────── */
+// ─── UPDATE PROJECT ───────────────────────────────────────────────────────────
 
 export function useUpdateProject() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
 
   return useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<Project> & { id: string }) => {
-      if (!user?.id || !id) throw new Error("Invalid request");
-
-      const { data, error } = await supabase
-        .from("projects")
-        .update({
-          ...updates,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", id)
-        .eq("user_id", user.id)
-        .select()
-        .single();
-
-      if (error) throw new Error(error.message);
-      return data as Project;
-    },
+    mutationFn: ({ id, ...updates }: Partial<Project> & { id: string }) =>
+      apiFetch<Project>(`/api/projects/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(updates),
+      }),
 
     onSuccess: (_, vars) => {
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["projects", user?.id] });
       queryClient.invalidateQueries({ queryKey: ["project", vars.id] });
     },
   });
 }
 
-/* ─────────────────────────────────────────────
-   DELETE PROJECT
-──────────────────────────────────────────── */
+// ─── DELETE PROJECT ───────────────────────────────────────────────────────────
 
 export function useDeleteProject() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
 
   return useMutation({
-    mutationFn: async (id: string) => {
-      if (!user?.id || !id) throw new Error("Invalid request");
-
-      await supabase.from("messages").delete().eq("project_id", id);
-
-      const { error } = await supabase
-        .from("projects")
-        .delete()
-        .eq("id", id)
-        .eq("user_id", user.id);
-
-      if (error) throw new Error(error.message);
-    },
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/api/projects/${id}`, { method: "DELETE" }),
 
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["projects", user?.id] });
     },
   });
 }
 
-/* ─────────────────────────────────────────────
-   MESSAGES
-──────────────────────────────────────────── */
+// ─── MESSAGES ─────────────────────────────────────────────────────────────────
 
 export function useProjectMessages(projectId: string | undefined) {
   const { user } = useAuth();
 
   return useQuery({
     queryKey: ["messages", projectId],
-    enabled: !!user?.id && !!projectId && projectId !== "new" && projectId !== "demo",
-    queryFn: async () => {
-      if (!user?.id || !projectId) throw new Error("Invalid request");
-
-      const { data, error } = await supabase
-        .from("messages")
-        .select("*")
-        .eq("project_id", projectId)
-        .order("created_at", { ascending: true });
-
-      if (error) throw new Error(error.message);
-      return data as Message[];
-    },
+    enabled:
+      !!user?.id &&
+      !!projectId &&
+      projectId !== "new" &&
+      projectId !== "demo",
+    queryFn: () =>
+      apiFetch<Message[]>(`/api/projects/${projectId}/messages`),
   });
 }
 
-/* ─────────────────────────────────────────────
-   SAVE MESSAGE
-──────────────────────────────────────────── */
+// ─── SAVE MESSAGE ─────────────────────────────────────────────────────────────
 
 export function useSaveMessage() {
   const queryClient = useQueryClient();
-  const { user } = useAuth();
 
   return useMutation({
-    mutationFn: async (msg: {
+    mutationFn: (msg: {
       project_id: string;
       role: string;
       agent?: string;
       content: string;
-    }) => {
-      if (!user?.id) throw new Error("User not found");
-
-      const { data, error } = await supabase
-        .from("messages")
-        .insert({
-          ...msg,
-          user_id: user.id,
-        })
-        .select()
-        .single();
-
-      if (error) throw new Error(error.message);
-      return data as Message;
-    },
+    }) =>
+      apiFetch<Message>("/api/projects/messages", {
+        method: "POST",
+        body: JSON.stringify(msg),
+      }),
 
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({

@@ -1,24 +1,40 @@
-// src/lib/supabaseStorage.ts
+// src/lib/backendStorage.ts
+// Avatar uploads now go to the Express backend, which stores the URL
+// in MongoDB (User model). No Supabase Storage is used.
+
 import { supabase } from "@/integrations/supabase/client";
 
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
+
 /**
- * Uploads an avatar image for the current user.
- * @param userId The authenticated user ID.
- * @param file The image file to upload.
- * @returns Public URL of the uploaded avatar.
+ * Uploads an avatar image for the current user via the backend.
+ * @param file   The image File to upload.
+ * @returns      The public URL of the stored avatar.
  */
-export async function uploadAvatar(userId: string, file: File): Promise<string> {
-  const fileExt = file.name.split('.').pop();
-  const fileName = `${userId}/avatar.${fileExt}`;
-  const { data, error } = await supabase.storage
-    .from('avatars')
-    .upload(fileName, file, { upsert: true });
+export async function uploadAvatar(file: File): Promise<string> {
+  const { data, error } = await supabase.auth.getSession();
+  if (error || !data.session?.access_token) {
+    throw new Error("Not authenticated");
+  }
 
-  if (error) throw error;
+  const formData = new FormData();
+  formData.append("avatar", file);
 
-  const { data: publicUrlData } = supabase.storage
-    .from('avatars')
-    .getPublicUrl(fileName);
+  const res = await fetch(`${API_BASE}/api/users/avatar`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${data.session.access_token}`,
+      // Do NOT set Content-Type here — browser sets it automatically
+      // with the correct multipart boundary when using FormData.
+    },
+    body: formData,
+  });
 
-  return publicUrlData.publicUrl;
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Upload failed" }));
+    throw new Error(err.error || "Avatar upload failed");
+  }
+
+  const result = await res.json();
+  return result.avatar_url as string;
 }

@@ -1,15 +1,16 @@
 /**
  * AuthCallback.tsx
  *
- * Supabase redirects the user here after they click the confirmation link in
- * their email. The URL contains either:
- *   - A `code` query param  (PKCE flow — Supabase default for new projects)
- *   - A `#access_token` hash (implicit flow — older projects)
+ * Supabase redirects here after the user clicks the email confirmation link.
+ * The URL contains either:
+ *   - ?code=...  (PKCE flow — default for new Supabase projects)
+ *   - #access_token=... (implicit flow — older projects)
  *
- * The Supabase client processes the URL automatically via detectSessionInUrl.
- * We listen for the resulting SIGNED_IN / USER_UPDATED event, then immediately
- * sign the user out so they must log in manually, fulfilling the strict
- * "signup → email confirm → login" requirement.
+ * After confirming the session we:
+ *   1. Upload any pending avatar to the backend (not Supabase Storage)
+ *   2. Persist the avatar_url in Supabase user_metadata
+ *   3. Sign the user out so they must log in manually
+ *   4. Redirect to /login?confirmed=true
  */
 
 import { useEffect, useState } from "react";
@@ -28,8 +29,7 @@ const AuthCallback = () => {
     let redirectTimer: ReturnType<typeof setTimeout>;
 
     const handleCallback = async () => {
-      // ── 1. Exchange the code / hash for a session ────────────────────────
-      // For PKCE flow Supabase requires an explicit exchange.
+      // ── 1. Exchange PKCE code for a session ───────────────────────────────
       const params = new URLSearchParams(window.location.search);
       const code = params.get("code");
 
@@ -37,42 +37,59 @@ const AuthCallback = () => {
         const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (error) {
           setStatus("error");
-          setMessage("The confirmation link is invalid or has expired. Please sign up again.");
+          setMessage(
+            "The confirmation link is invalid or has expired. Please sign up again."
+          );
           return;
         }
       }
 
-      // ── 2. Wait for the live session (covers both PKCE and implicit flow) ─
-      const { data: { session } } = await supabase.auth.getSession();
+      // ── 2. Confirm a live session exists ──────────────────────────────────
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
       if (!session) {
         setStatus("error");
-        setMessage("Could not verify your email. The link may have expired. Please sign up again.");
+        setMessage(
+          "Could not verify your email. The link may have expired. Please sign up again."
+        );
         return;
       }
 
-      // ── 3. Upload any pending avatar that was queued during signup ────────
+      // ── 3. Upload pending avatar via backend ──────────────────────────────
+      // The avatar File was serialised to a data-URL during signup and stored
+      // in sessionStorage so it survives the email confirmation redirect.
       try {
-        const pendingDataUrl  = sessionStorage.getItem("pending_avatar_data_url");
-        const pendingUserId   = sessionStorage.getItem("pending_avatar_user_id");
+        const pendingDataUrl = sessionStorage.getItem("pending_avatar_data_url");
+        const pendingUserId = sessionStorage.getItem("pending_avatar_user_id");
         const pendingFullName = sessionStorage.getItem("pending_avatar_full_name");
 
-        if (pendingDataUrl && pendingUserId && pendingUserId === session.user.id) {
+        if (
+          pendingDataUrl &&
+          pendingUserId &&
+          pendingUserId === session.user.id
+        ) {
           // Convert data-URL → File
-          const res  = await fetch(pendingDataUrl);
+          const res = await fetch(pendingDataUrl);
           const blob = await res.blob();
           const file = new File([blob], "avatar.jpg", { type: blob.type });
 
-          const avatarUrl = await uploadAvatar(session.user.id, file);
+          // Upload to backend (returns public URL)
+          const avatarUrl = await uploadAvatar(file);
+
+          // Persist in Supabase user_metadata so the avatar is available
+          // from the session everywhere without an extra backend call.
           await supabase.auth.updateUser({
             data: {
-              full_name: pendingFullName ?? session.user.user_metadata?.full_name,
+              full_name:
+                pendingFullName ?? session.user.user_metadata?.full_name,
               avatar_url: avatarUrl,
             },
           });
         }
       } catch (err) {
-        // Avatar upload failure is non-fatal — user is still confirmed
+        // Non-fatal — the user is still confirmed even if avatar upload fails.
         console.error("Pending avatar upload failed:", err);
       } finally {
         sessionStorage.removeItem("pending_avatar_data_url");
@@ -81,25 +98,22 @@ const AuthCallback = () => {
       }
 
       // ── 4. Sign the user out ──────────────────────────────────────────────
-      // Email is now confirmed in Supabase's database. We sign out here so
-      // the user must go through the login page — enforcing the strict flow.
+      // Email is now confirmed. We force them through the login page.
       await supabase.auth.signOut();
 
       setStatus("success");
       setMessage("Email confirmed! Redirecting to sign in…");
 
-      // ── 5. Redirect to login with a flag so the Login page can show a banner
+      // ── 5. Redirect to login with confirmed flag ───────────────────────────
       redirectTimer = setTimeout(() => {
         navigate("/login?confirmed=true", { replace: true });
       }, 2000);
     };
 
     handleCallback();
-
     return () => clearTimeout(redirectTimer);
   }, [navigate]);
 
-  // ── UI ────────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-4">
       <div className="w-full max-w-sm text-center space-y-4">
@@ -115,7 +129,6 @@ const AuthCallback = () => {
         {status === "success" && (
           <>
             <div className="flex justify-center">
-              {/* Simple animated checkmark — no extra dependency */}
               <svg
                 className="h-14 w-14 text-primary"
                 viewBox="0 0 52 52"

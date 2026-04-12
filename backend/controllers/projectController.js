@@ -1,129 +1,107 @@
+// backend/controllers/projectController.js
 import Project from "../models/Project.js";
 import Message from "../models/Message.js";
-import mongoose from "mongoose";
 
-// @desc    Get all projects for logged-in user
+// ── GET /api/projects ─────────────────────────────────────────────────────────
 export const getProjects = async (req, res) => {
   try {
     const projects = await Project.find({ user_id: req.user.id }).sort({
       updatedAt: -1,
     });
     res.json(projects);
-  } catch (error) {
-    console.error("getProjects error:", error);
-    res.status(500).json({ message: error.message });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 };
 
-// @desc    Get single project by ID
+// ── GET /api/projects/:id ─────────────────────────────────────────────────────
 export const getProjectById = async (req, res) => {
   try {
     const project = await Project.findOne({
       _id: req.params.id,
       user_id: req.user.id,
     });
-    if (!project) return res.status(404).json({ message: "Project not found" });
+    if (!project) return res.status(404).json({ error: "Not found" });
     res.json(project);
-  } catch (error) {
-    console.error("getProjectById error:", error);
-    res.status(500).json({ message: error.message });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 };
 
-// @desc    Create a new project
+// ── POST /api/projects ────────────────────────────────────────────────────────
 export const createProject = async (req, res) => {
   try {
-    const { title, description } = req.body;
     const project = await Project.create({
       user_id: req.user.id,
-      title: title || "Untitled Project",
-      description: description || "",
+      title: req.body.title || "Untitled",
+      description: req.body.description || "",
     });
     res.status(201).json(project);
-  } catch (error) {
-    console.error("createProject error:", error);
-    res.status(500).json({ message: error.message });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 };
 
-// @desc    Update a project
+// ── PUT /api/projects/:id ─────────────────────────────────────────────────────
 export const updateProject = async (req, res) => {
   try {
-    const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ message: "Invalid project ID" });
-    }
-    const {
-      title,
-      description,
-      language,
-      status,
-      plan,
-      generated_code,
-      console_output,
-    } = req.body;
+    // Strip fields the client should never overwrite directly
+    const { user_id, _id, ...updates } = req.body;
+
     const project = await Project.findOneAndUpdate(
-      { _id: id, user_id: req.user.id },
-      {
-        title,
-        description,
-        language,
-        status,
-        plan,
-        generated_code,
-        console_output,
-      },
-      { new: true, runValidators: true },
+      { _id: req.params.id, user_id: req.user.id },
+      updates,
+      { new: true },
     );
-    if (!project) return res.status(404).json({ message: "Project not found" });
+    if (!project) return res.status(404).json({ error: "Not found" });
     res.json(project);
-  } catch (error) {
-    console.error("updateProject error:", error);
-    res.status(500).json({ message: error.message });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 };
 
-// @desc    Delete a project
+// ── DELETE /api/projects/:id ──────────────────────────────────────────────────
 export const deleteProject = async (req, res) => {
   try {
-    const { id } = req.params;
     const project = await Project.findOneAndDelete({
-      _id: id,
+      _id: req.params.id,
       user_id: req.user.id,
     });
-    if (!project) return res.status(404).json({ message: "Project not found" });
-    await Message.deleteMany({ project_id: id });
-    res.json({ message: "Project deleted" });
-  } catch (error) {
-    console.error("deleteProject error:", error);
-    res.status(500).json({ message: error.message });
+    if (!project) return res.status(404).json({ error: "Not found" });
+
+    // Cascade-delete all messages belonging to this project
+    await Message.deleteMany({ project_id: req.params.id });
+
+    res.json({ message: "Deleted" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 };
 
-// @desc    Get all messages for a project
+// ── GET /api/projects/:projectId/messages ─────────────────────────────────────
 export const getProjectMessages = async (req, res) => {
   try {
-    const { projectId } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(projectId)) {
-      return res.status(400).json({ message: "Invalid project ID" });
-    }
-    const messages = await Message.find({ project_id: projectId }).sort({
-      createdAt: 1,
-    });
+    const messages = await Message.find({
+      project_id: req.params.projectId,
+    }).sort({ createdAt: 1 });
     res.json(messages);
-  } catch (error) {
-    console.error("getProjectMessages error:", error);
-    res.status(500).json({ message: error.message });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 };
 
-// @desc    Save a new message
+// ── POST /api/projects/messages ───────────────────────────────────────────────
+// project_id comes from req.body (set by the frontend hook)
 export const saveMessage = async (req, res) => {
   try {
     const { project_id, role, agent, content } = req.body;
-    if (!mongoose.Types.ObjectId.isValid(project_id)) {
-      return res.status(400).json({ message: "Invalid project ID" });
+
+    if (!project_id || !role || !content) {
+      return res
+        .status(400)
+        .json({ error: "project_id, role, and content are required" });
     }
+
     const message = await Message.create({
       project_id,
       user_id: req.user.id,
@@ -132,8 +110,7 @@ export const saveMessage = async (req, res) => {
       content,
     });
     res.status(201).json(message);
-  } catch (error) {
-    console.error("saveMessage error:", error);
-    res.status(500).json({ message: error.message });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 };

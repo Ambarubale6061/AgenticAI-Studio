@@ -1,15 +1,17 @@
+// backend/routes/agentRoutes.js
 import express from "express";
-import { protect } from "../middleware/authMiddleware.js";
 import {
   planner,
   coder,
   debuggerAgent,
   execute,
 } from "../controllers/agentController.js";
+import { protect } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-router.use(protect); // All agent routes require authentication
+// All agent routes require a valid Supabase JWT
+router.use(protect);
 
 router.post("/planner", planner);
 router.post("/coder", coder);

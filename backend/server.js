@@ -1,37 +1,48 @@
 // backend/server.js
-// The backend now only handles AI agent routes (Planner, Coder, Debugger, Executor).
-// All project/message data is stored in Supabase and accessed directly from
-// the frontend. MongoDB, project routes, and auth middleware are removed.
-
 import dotenv from "dotenv";
 dotenv.config();
 
 import express from "express";
 import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
 
+import connectDB from "./config/db.js";
+import projectRoutes from "./routes/projectRoutes.js";
 import agentRoutes from "./routes/agentRoutes.js";
+import versionRoutes from "./routes/versionRoutes.js";
+import userRoutes from "./routes/userRoutes.js";
 import { errorHandler } from "./middleware/errorMiddleware.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// ── DB CONNECT ─────────────────────────────────────
+connectDB();
 
 const app = express();
 
-// ─── CORS ─────────────────────────────────────────────────────────────────────
+// ── CORS CONFIG (FIXED) ────────────────────────────
 const allowedOrigins = [
   "http://localhost:5173",
-  "http://localhost:8080",
   "http://localhost:3000",
-  process.env.FRONTEND_URL, // e.g. https://agentic-ai-studio-chi.vercel.app
-  process.env.FRONTEND_URL_2, // optional second URL
+  "http://localhost:8080",
+  process.env.FRONTEND_URL,
 ].filter(Boolean);
 
-console.log("✅ CORS allowed origins:", allowedOrigins);
-
+// Main CORS middleware
 app.use(
   cors({
-    origin: (origin, callback) => {
+    origin: function (origin, callback) {
+      // allow tools like Postman
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      console.warn(`⛔ CORS blocked origin: ${origin}`);
-      return callback(new Error(`CORS not allowed for origin: ${origin}`));
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.log("❌ Blocked by CORS:", origin);
+      return callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -39,28 +50,37 @@ app.use(
   }),
 );
 
-// ─── Body parser ──────────────────────────────────────────────────────────────
-app.use(express.json({ limit: "10mb" }));
+// ── HANDLE PREFLIGHT REQUESTS ──────────────────────
+app.options("*", cors());
 
-// ─── Routes ───────────────────────────────────────────────────────────────────
-// Only agent routes remain. Projects and messages are in Supabase (frontend).
+// ── BODY PARSER ────────────────────────────────────
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// ── STATIC FILES ───────────────────────────────────
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+// ── ROUTES ─────────────────────────────────────────
+app.use("/api/projects", projectRoutes);
 app.use("/api/agent", agentRoutes);
+app.use("/api/versions", versionRoutes);
+app.use("/api/users", userRoutes);
 
-// ─── Health check ─────────────────────────────────────────────────────────────
+// ── HEALTH CHECK ───────────────────────────────────
 app.get("/health", (_req, res) => {
-  res.status(200).json({ status: "OK", message: "Backend running" });
+  res.json({
+    status: "OK",
+    timestamp: new Date().toISOString(),
+  });
 });
 
-// ─── 404 catch-all ────────────────────────────────────────────────────────────
-app.use((_req, res) => {
-  res.status(404).json({ error: "Route not found" });
-});
-
-// ─── Global error handler ─────────────────────────────────────────────────────
+// ── GLOBAL ERROR HANDLER ───────────────────────────
 app.use(errorHandler);
 
-// ─── Start ────────────────────────────────────────────────────────────────────
+// ── SERVER START ────────────────────────────────────
 const PORT = process.env.PORT || 5000;
+
 app.listen(PORT, () => {
   console.log(`🚀 Backend running on port ${PORT}`);
+  console.log(`✅ Allowed CORS origins:`, allowedOrigins);
 });

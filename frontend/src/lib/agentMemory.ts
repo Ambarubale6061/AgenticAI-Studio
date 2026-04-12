@@ -1,4 +1,8 @@
-// Agent Memory System — stores error/fix patterns for smarter debugging
+// src/lib/agentMemory.ts
+// Agent Memory System — stores error/fix patterns locally for smarter debugging.
+// Uses localStorage only. No Supabase, no backend calls.
+// This is intentionally local-only: memory is per-browser, ephemeral,
+// and used purely to make the debugger agent smarter within a session.
 
 export interface MemoryEntry {
   id: string;
@@ -22,10 +26,15 @@ function loadMemory(): MemoryEntry[] {
 }
 
 function saveMemory(entries: MemoryEntry[]) {
-  localStorage.setItem(MEMORY_KEY, JSON.stringify(entries.slice(-MAX_ENTRIES)));
+  localStorage.setItem(
+    MEMORY_KEY,
+    JSON.stringify(entries.slice(-MAX_ENTRIES))
+  );
 }
 
-export function addMemoryEntry(entry: Omit<MemoryEntry, "id" | "timestamp">): MemoryEntry {
+export function addMemoryEntry(
+  entry: Omit<MemoryEntry, "id" | "timestamp">
+): MemoryEntry {
   const entries = loadMemory();
   const newEntry: MemoryEntry = {
     ...entry,
@@ -37,23 +46,31 @@ export function addMemoryEntry(entry: Omit<MemoryEntry, "id" | "timestamp">): Me
   return newEntry;
 }
 
-export function findSimilarFixes(errorMessage: string, language: string): MemoryEntry[] {
+export function findSimilarFixes(
+  errorMessage: string,
+  language: string
+): MemoryEntry[] {
   const entries = loadMemory();
   const errorLower = errorMessage.toLowerCase();
-  const keywords = errorLower.split(/\s+/).filter(w => w.length > 3);
+  const keywords = errorLower.split(/\s+/).filter((w) => w.length > 3);
 
   return entries
-    .filter(e => {
+    .filter((e) => {
       if (e.language !== language) return false;
       const patternLower = e.errorPattern.toLowerCase();
-      const matchCount = keywords.filter(k => patternLower.includes(k)).length;
+      const matchCount = keywords.filter((k) =>
+        patternLower.includes(k)
+      ).length;
       return matchCount >= Math.max(1, keywords.length * 0.3);
     })
     .sort((a, b) => b.timestamp - a.timestamp)
     .slice(0, 5);
 }
 
-export function getMemoryStats(): { total: number; languages: Record<string, number> } {
+export function getMemoryStats(): {
+  total: number;
+  languages: Record<string, number>;
+} {
   const entries = loadMemory();
   const languages: Record<string, number> = {};
   for (const e of entries) {
@@ -62,15 +79,23 @@ export function getMemoryStats(): { total: number; languages: Record<string, num
   return { total: entries.length, languages };
 }
 
-export function getMemoryContext(errorMessage: string, language: string): string {
+export function getMemoryContext(
+  errorMessage: string,
+  language: string
+): string {
   const similar = findSimilarFixes(errorMessage, language);
   if (similar.length === 0) return "";
 
-  return "\n\n--- AGENT MEMORY (past fixes for similar errors) ---\n" +
-    similar.map((e, i) =>
-      `[${i + 1}] Error: ${e.errorPattern.substring(0, 100)}\n    Fix: ${e.fix.substring(0, 200)}\n    Confidence: ${e.confidence}`
-    ).join("\n") +
-    "\n--- END MEMORY ---\n";
+  return (
+    "\n\n--- AGENT MEMORY (past fixes for similar errors) ---\n" +
+    similar
+      .map(
+        (e, i) =>
+          `[${i + 1}] Error: ${e.errorPattern.substring(0, 100)}\n    Fix: ${e.fix.substring(0, 200)}\n    Confidence: ${e.confidence}`
+      )
+      .join("\n") +
+    "\n--- END MEMORY ---\n"
+  );
 }
 
 export function clearMemory() {
