@@ -1,35 +1,26 @@
 // backend/server.js
+// The backend now only handles AI agent routes (Planner, Coder, Debugger, Executor).
+// All project/message data is stored in Supabase and accessed directly from
+// the frontend. MongoDB, project routes, and auth middleware are removed.
 
 import dotenv from "dotenv";
 dotenv.config();
 
 import express from "express";
 import cors from "cors";
-import connectDB from "./config/db.js";
 
 import agentRoutes from "./routes/agentRoutes.js";
-import projectRoutes from "./routes/projectRoutes.js";
-import versionRoutes from "./routes/versionRoutes.js";
-
 import { errorHandler } from "./middleware/errorMiddleware.js";
-
-// Connect DB
-connectDB();
 
 const app = express();
 
-// ─── CORS ────────────────────────────────────────────────────────────────────
-
-// FIX 1: Removed `as string[]` type assertion — this is a .js file, not .ts.
-// FIX 2: process.env.FRONTEND_URL was undefined when not set in Render,
-//         causing the array to contain `undefined` and silently block all requests.
-//         We now filter out falsy values and use a function-based origin checker.
+// ─── CORS ─────────────────────────────────────────────────────────────────────
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:8080",
   "http://localhost:3000",
   process.env.FRONTEND_URL, // e.g. https://agentic-ai-studio-chi.vercel.app
-  process.env.FRONTEND_URL_2, // optional second frontend URL
+  process.env.FRONTEND_URL_2, // optional second URL
 ].filter(Boolean);
 
 console.log("✅ CORS allowed origins:", allowedOrigins);
@@ -37,7 +28,6 @@ console.log("✅ CORS allowed origins:", allowedOrigins);
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (e.g. server-to-server, curl, Postman)
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
       console.warn(`⛔ CORS blocked origin: ${origin}`);
@@ -52,10 +42,9 @@ app.use(
 // ─── Body parser ──────────────────────────────────────────────────────────────
 app.use(express.json({ limit: "10mb" }));
 
-// ─── Routes ──────────────────────────────────────────────────────────────────
+// ─── Routes ───────────────────────────────────────────────────────────────────
+// Only agent routes remain. Projects and messages are in Supabase (frontend).
 app.use("/api/agent", agentRoutes);
-app.use("/api/projects", projectRoutes);
-app.use("/api/versions", versionRoutes);
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => {
