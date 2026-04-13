@@ -11,7 +11,7 @@ import Signup from "./pages/Signup.tsx";
 import Dashboard from "./pages/Dashboard.tsx";
 import Workspace from "./pages/Workspace.tsx";
 import NotFound from "./pages/NotFound.tsx";
-import AuthCallback from "@/pages/Authcallback.tsx";
+import AuthCallback from "@/pages/AuthCallback.tsx";
 
 const queryClient = new QueryClient();
 
