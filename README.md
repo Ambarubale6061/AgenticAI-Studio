@@ -55,7 +55,7 @@ The workspace is modelled after VS Code: resizable panels, a file explorer with 
 | Service         | URL                                                                           | Platform |
 | --------------- | ----------------------------------------------------------------------------- | -------- |
 | **Frontend**    | [agentic-ai-studio-chi.vercel.app](https://agentic-ai-studio-chi.vercel.app/) | Vercel   |
-| **Backend API** | [agenticai-studio.onrender.com](https://agenticai-studio.onrender.com)        | Render   |
+| **Backend** | [agenticai-studio.onrender.com](https://agenticai-studio.onrender.com)        | Render   |
 
 > Try it without signing up — visit the demo and click **Try Demo** for one free generation.
 
