@@ -218,16 +218,25 @@ const Dashboard = () => {
               </Button>
             </div>
 
-            {/* Search */}
-            <div className="relative mb-6">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search projects..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-10 bg-card/50 border-border/50"
-              />
-            </div>
+            {/* 🔍 Search */}
+<div className="relative mb-6">
+  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+  
+  {/* क्रोमच्या ऑटो-फिल बॉटला फसवण्यासाठी हा छुपे डमी इनपुट्स (हे स्क्रीनवर दिसणार नाहीत) */}
+  <input type="text" style={{ display: 'none' }} autoComplete="off" disabled />
+  <input type="password" style={{ display: 'none' }} autoComplete="off" disabled />
+
+  <Input
+    type="search"
+    id="dashboard-project-search"
+    name="dashboardSearchInput"
+    autoComplete="one-time-code" // क्रोम या इनपुटमध्ये कधीच ईमेल ऑटो-फिल करणार नाही
+    placeholder="Search projects..."
+    value={search}
+    onChange={(e) => setSearch(e.target.value)}
+    className="pl-10 bg-card/50 border-border/50"
+  />
+</div>
 
             {/* Project list */}
             {isLoading ? (
