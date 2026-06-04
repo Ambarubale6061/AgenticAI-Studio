@@ -1,4 +1,3 @@
-// src/hooks/useProjects.ts
 // ALL data operations now go through the Express/MongoDB backend.
 // Supabase is used ONLY for auth — getSession() here is just to get
 // the JWT access token that the backend's authMiddleware validates.
@@ -7,7 +6,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
+// हे आता frontend/.env मधील VITE_API_BASE_URL (http://localhost:5000) मधून डेटा घेईल
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:5000").replace(/\/+$/, "");
 
 // ─── Shared fetch helper ──────────────────────────────────────────────────────
 async function apiFetch<T>(

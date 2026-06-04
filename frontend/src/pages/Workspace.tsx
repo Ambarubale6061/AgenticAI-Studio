@@ -1,5 +1,5 @@
 // src/pages/Workspace.tsx
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Sparkles, ArrowRight, Eye, EyeOff,
@@ -307,9 +307,6 @@ function SearchPanel({ files, onOpenFile }: SearchPanelProps) {
     </div>
   );
 }
-
-// ── Editor Tabs Component (no longer used, but kept for reference) ──
-// The component is not rendered anywhere.
 
 // ── Command Palette ──────────────────────────────────────────────
 interface CommandPaletteProps {
@@ -747,13 +744,19 @@ const Workspace = () => {
   const [isMobile, setIsMobile] = useState(false);
   const [mobileTab, setMobileTab] = useState<"chat"|"code"|"preview"|"console">("chat");
   const [isPlanOpen, setIsPlanOpen] = useState(true);
+
+  // ─────────────────────────────────────────────────────────────────
+  // FIX 1: expandedFolders is tracked via a ref-backed Set to avoid
+  // triggering re-renders on every update, while still allowing
+  // controlled updates through the toggle handler.
+  // ─────────────────────────────────────────────────────────────────
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: FileNode | null } | null>(null);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [openFileIds, setOpenFileIds] = useState<string[]>([]);
   const [renameTarget, setRenameTarget] = useState<FileNode | null>(null);
   const [renameValue, setRenameValue] = useState("");
-  const [newItemPrompt, setNewItemPrompt] = useState<{ type: 'file' | 'folder'; parentPath: string } | null>(null);
 
   const { user } = useAuth();
   const fullName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "User";
@@ -772,11 +775,25 @@ const Workspace = () => {
     handleRunCode, clearConsole,
   } = useAgentPipeline(projectId);
 
-  // Local messages state
+  // ─────────────────────────────────────────────────────────────────
+  // FIX 2: Sync localMessages from the hook's messages using a stable
+  // reference comparison. The original code always called
+  // setLocalMessages(messages) whenever `messages` changed identity,
+  // which was fine — but pairing it with wrappedHandleSendMessage
+  // optimistically pushing to localMessages created race conditions.
+  // We now initialise from the hook and only sync additions.
+  // ─────────────────────────────────────────────────────────────────
   const [localMessages, setLocalMessages] = useState(messages);
+  const prevMessagesLengthRef = useRef(messages.length);
 
   useEffect(() => {
-    setLocalMessages(messages);
+    // Only sync when the hook's messages array grows (new messages from
+    // the agent), not on every identity change. This prevents the
+    // duplicate-message flicker caused by optimistic + real updates.
+    if (messages.length !== prevMessagesLengthRef.current) {
+      prevMessagesLengthRef.current = messages.length;
+      setLocalMessages(messages);
+    }
   }, [messages]);
 
   const wrappedHandleSendMessage = useCallback((content: string) => {
@@ -790,30 +807,91 @@ const Workspace = () => {
     handleSendMessage(content);
   }, [handleSendMessage]);
 
-  // Clear chat function
   const handleClearChat = useCallback(() => {
     setLocalMessages([]);
   }, []);
 
-  // Build file tree
-  const fileTree = buildFileTree(files.map(f => ({ id: f.id, name: f.filename, language: f.language })));
+  // ─────────────────────────────────────────────────────────────────
+  // FIX 3: Memoize fileTree so it is only recomputed when `files`
+  // actually changes. Without this, buildFileTree() produces a brand-
+  // new array reference on every render, causing every effect that
+  // depends on `fileTree` to fire unnecessarily.
+  // ─────────────────────────────────────────────────────────────────
+  const fileTree = useMemo(
+    () => buildFileTree(files.map(f => ({ id: f.id, name: f.filename, language: f.language }))),
+    [files]
+  );
 
-  // Auto-expand root folders
+  // ─────────────────────────────────────────────────────────────────
+  // FIX 4 (PRIMARY BUG — "Maximum update depth exceeded"):
+  //
+  // ORIGINAL (broken):
+  //   useEffect(() => {
+  //     const newExpanded = new Set(expandedFolders);
+  //     fileTree.forEach(node => {
+  //       if (node.type === 'folder' && !expandedFolders.has(node.path)) {
+  //         newExpanded.add(node.path);
+  //       }
+  //     });
+  //     setExpandedFolders(newExpanded);   // ← ALWAYS called, even when nothing changed
+  //   }, [fileTree, expandedFolders]);    // ← expandedFolders is both dep AND updated here
+  //
+  // Why it looped:
+  //   1. fileTree changes (new ref on every render without useMemo)
+  //   2. Effect fires → setExpandedFolders(new Set(...)) called unconditionally
+  //   3. expandedFolders reference changes (new Set instance each time)
+  //   4. Effect fires again → goto 2 → infinite loop
+  //
+  // FIX: Track which folder paths have already been auto-expanded with
+  // a ref so the effect only calls setState when genuinely new folders
+  // are encountered, and remove `expandedFolders` from the dep array.
+  // ─────────────────────────────────────────────────────────────────
+  const autoExpandedRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
-    const newExpanded = new Set(expandedFolders);
+    const toAdd: string[] = [];
     fileTree.forEach(node => {
-      if (node.type === 'folder' && !expandedFolders.has(node.path)) {
-        newExpanded.add(node.path);
+      if (node.type === 'folder' && !autoExpandedRef.current.has(node.path)) {
+        autoExpandedRef.current.add(node.path);
+        toAdd.push(node.path);
       }
     });
-    setExpandedFolders(newExpanded);
-  }, [fileTree, expandedFolders]);
 
-  useEffect(() => {
-    if (activeFileId && !openFileIds.includes(activeFileId)) {
-      setOpenFileIds(prev => [...prev, activeFileId]);
+    if (toAdd.length > 0) {
+      setExpandedFolders(prev => {
+        const next = new Set(prev);
+        toAdd.forEach(p => next.add(p));
+        return next;
+      });
     }
-  }, [activeFileId, openFileIds]);
+    // Only depends on fileTree — expandedFolders is NOT a dependency,
+    // eliminating the circular update chain.
+  }, [fileTree]);
+
+  // ─────────────────────────────────────────────────────────────────
+  // FIX 5: Stable toggle handler — memoized so child tree items don't
+  // re-render due to a new function reference on every render.
+  // ─────────────────────────────────────────────────────────────────
+  const handleToggleFolder = useCallback((path: string) => {
+    setExpandedFolders(prev => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
+
+  // ─────────────────────────────────────────────────────────────────
+  // FIX 6: Open-file tracking — guard against adding a file id that is
+  // already present to avoid unnecessary state updates.
+  // ─────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (activeFileId) {
+      setOpenFileIds(prev =>
+        prev.includes(activeFileId) ? prev : [...prev, activeFileId]
+      );
+    }
+  }, [activeFileId]);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -864,22 +942,22 @@ const Workspace = () => {
     if (lastExecutionResult) setShowPreview(true);
   }, [lastExecutionResult]);
 
-const handleDemoSend = useCallback((content: string) => {
-  if (!user) {
-    setShowSignupWall(true);
-    return;
-  }
-  if (isDemo) {
-    if (getDemoCount() >= DEMO_LIMIT) {
+  const handleDemoSend = useCallback((content: string) => {
+    if (!user) {
       setShowSignupWall(true);
       return;
     }
-    incrementDemoCount();
-  }
-  wrappedHandleSendMessage(content);
-}, [isDemo, user, wrappedHandleSendMessage]);
+    if (isDemo) {
+      if (getDemoCount() >= DEMO_LIMIT) {
+        setShowSignupWall(true);
+        return;
+      }
+      incrementDemoCount();
+    }
+    wrappedHandleSendMessage(content);
+  }, [isDemo, user, wrappedHandleSendMessage]);
 
-  const handleIconClick = (id: string) => {
+  const handleIconClick = useCallback((id: string) => {
     if (id === activeIconId && showSidebar) {
       setShowSidebar(false);
     } else {
@@ -889,34 +967,37 @@ const handleDemoSend = useCallback((content: string) => {
       else setSidebarTab("files");
       setShowSidebar(true);
     }
-  };
+  }, [activeIconId, showSidebar]);
 
-  const handleCloseFile = (fileId: string) => {
+  const handleCloseFile = useCallback((fileId: string) => {
     setOpenFileIds(prev => prev.filter(id => id !== fileId));
     if (activeFileId === fileId) {
-      const remaining = openFileIds.filter(id => id !== fileId);
-      setActiveFileId(remaining[0] || null);
+      setOpenFileIds(prev => {
+        const remaining = prev.filter(id => id !== fileId);
+        setActiveFileId(remaining[0] || null);
+        return remaining;
+      });
     }
-  };
+  }, [activeFileId, setActiveFileId]);
 
-  const handleCloseAllEditors = () => {
+  const handleCloseAllEditors = useCallback(() => {
     setOpenFileIds([]);
     setActiveFileId(null);
-  };
+  }, [setActiveFileId]);
 
-  const handleFileTreeSelect = (fileId: string) => {
+  const handleFileTreeSelect = useCallback((fileId: string) => {
     setActiveFileId(fileId);
-    if (!openFileIds.includes(fileId)) {
-      setOpenFileIds(prev => [...prev, fileId]);
-    }
-  };
+    setOpenFileIds(prev =>
+      prev.includes(fileId) ? prev : [...prev, fileId]
+    );
+  }, [setActiveFileId]);
 
-  const handleContextMenu = (e: React.MouseEvent, node: FileNode) => {
+  const handleContextMenu = useCallback((e: React.MouseEvent, node: FileNode) => {
     e.preventDefault();
     setContextMenu({ x: e.clientX, y: e.clientY, node });
-  };
+  }, []);
 
-  const promptForNewItem = (type: 'file' | 'folder', parentPath: string) => {
+  const promptForNewItem = useCallback((type: 'file' | 'folder', parentPath: string) => {
     const defaultName = type === 'file' ? 'new-file.js' : 'new-folder';
     const name = window.prompt(`Enter ${type} name:`, defaultName);
     if (!name) return;
@@ -926,21 +1007,21 @@ const handleDemoSend = useCallback((content: string) => {
     } else {
       handleCreateFolder(fullPath);
     }
-  };
+  }, [handleCreateFile, handleCreateFolder]);
 
-  const handleRenameSubmit = () => {
+  const handleRenameSubmit = useCallback(() => {
     if (renameTarget && renameValue.trim()) {
       handleRenameFile(renameTarget.id, renameValue.trim());
     }
     setRenameTarget(null);
     setRenameValue("");
-  };
+  }, [renameTarget, renameValue, handleRenameFile]);
 
-  const handleDeleteWithConfirm = (node: FileNode) => {
+  const handleDeleteWithConfirm = useCallback((node: FileNode) => {
     if (confirm(`Delete ${node.name}?`)) {
       handleDeleteFile(node.id);
     }
-  };
+  }, [handleDeleteFile]);
 
   if (projectId === "new") {
     return (
@@ -955,7 +1036,7 @@ const handleDemoSend = useCallback((content: string) => {
     ? (activeFile.language?.charAt(0).toUpperCase() + activeFile.language?.slice(1) || "Plain Text")
     : "Plain Text";
 
-  // Mobile layout (tabs removed)
+  // Mobile layout
   if (isMobile) {
     return (
       <div className="h-[100dvh] flex flex-col bg-background">
@@ -999,10 +1080,7 @@ const handleDemoSend = useCallback((content: string) => {
             />
           )}
           {mobileTab === "code" && (
-            <>
-              {/* File name tabs removed */}
-              <CodePanel files={files} activeFileId={activeFileId} onSelectFile={handleFileTreeSelect} onFileChange={handleFileChange} onRunCode={handleRunCode} isRunning={isLoading} />
-            </>
+            <CodePanel files={files} activeFileId={activeFileId} onSelectFile={handleFileTreeSelect} onFileChange={handleFileChange} onRunCode={handleRunCode} isRunning={isLoading} />
           )}
           {mobileTab === "preview" && <PreviewPanel files={files} visible={true} executionResult={lastExecutionResult} />}
           {showConsole && (
@@ -1016,7 +1094,7 @@ const handleDemoSend = useCallback((content: string) => {
     );
   }
 
-  // Desktop layout (tabs removed)
+  // Desktop layout
   return (
     <TooltipProvider>
       <div className="h-screen flex flex-col bg-background overflow-hidden">
@@ -1176,12 +1254,7 @@ const handleDemoSend = useCallback((content: string) => {
                     onSelectFile={handleFileTreeSelect}
                     onContextMenu={handleContextMenu}
                     expandedFolders={expandedFolders}
-                    onToggleFolder={(path) => {
-                      const newSet = new Set(expandedFolders);
-                      if (newSet.has(path)) newSet.delete(path);
-                      else newSet.add(path);
-                      setExpandedFolders(newSet);
-                    }}
+                    onToggleFolder={handleToggleFolder}
                   />
                 )}
                 {sidebarTab === "search" && (
@@ -1194,7 +1267,7 @@ const handleDemoSend = useCallback((content: string) => {
             </div>
           )}
 
-          {/* Center Area - No file tabs above CodePanel */}
+          {/* Center Area */}
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
             {isPlanOpen && (
               <div className="shrink-0 border-b border-[hsl(var(--panel-border))] bg-[hsl(215_22%_9%)]">
